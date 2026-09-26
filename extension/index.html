@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <title>MyInstants</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="top">
+    <form id="searchForm" class="search" autocomplete="off">
+      <input id="searchInput" type="text" placeholder="Ses ara… (Enter)" spellcheck="false">
+      <button id="searchClear" type="button" class="clear" title="Aramayı temizle" hidden>✕</button>
+    </form>
+    <button id="refreshBtn" type="button" class="icon-btn" title="Yenile (listeyi siteden tekrar çeker)">↻</button>
+  </header>
+
+  <div class="controls">
+    <div id="region" class="seg" role="group" aria-label="Bölge">
+      <button type="button" data-region="tr">TR</button>
+      <button type="button" data-region="us">Global (US)</button>
+    </div>
+    <label class="volume" title="Önizleme ses seviyesi">
+      <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+        <path fill="currentColor" d="M2 6h3l4-3v10l-4-3H2z"/>
+        <path fill="none" stroke="currentColor" stroke-width="1.3" d="M11 5.5a3.5 3.5 0 0 1 0 5M12.8 3.7a6 6 0 0 1 0 8.6"/>
+      </svg>
+      <input id="volume" type="range" min="0" max="100" step="1" value="60">
+      <span id="volumeLabel" class="pct">%60</span>
+    </label>
+  </div>
+
+  <nav id="tabs" class="tabs">
+    <button type="button" data-tab="trending">Trending</button>
+    <button type="button" data-tab="best">Hall of Fame</button>
+    <button type="button" data-tab="recent">Just Added</button>
+    <button type="button" data-tab="category">Kategoriler</button>
+  </nav>
+
+  <div id="categoryBar" class="subbar" hidden>
+    <select id="categorySelect" title="Kategori"></select>
+  </div>
+  <div id="searchBar" class="subbar" hidden>
+    <span id="searchLabel" class="search-label"></span>
+    <button id="searchExit" type="button" class="link-btn">✕ Aramadan çık</button>
+  </div>
+
+  <main id="list" class="list">
+    <div id="rows"></div>
+    <div id="listEnd" class="list-end"></div>
+  </main>
+
+  <footer class="status">
+    <span id="statusText"></span>
+    <span id="hostText"></span>
+  </footer>
+
+  <script src="js/CSInterface.js"></script>
+  <script src="js/siteScraper.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<!--
+  SENTETİK ÖRNEK — gerçek site sayfası DEĞİL.
+  Yapı, aynı siteyi okuyan iki açık kaynak projenin kullandığı seçicilerden türetildi
+  (abdipr/myinstants-api, austenstone/myinstants-mcp). Gerçek HTML ile doğrulanınca güncellenecek.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Myinstants | Trending in Turkey! Page 1 of 50</title>
+</head>
+<body>
+  <div id="instants_container">
+    <div class="instant">
+      <div class="circle small-button-background" style="background-color:#FF0000;"></div>
+      <button class="small-button" onclick="play('/media/sounds/vine-boom.mp3', 'loader-70972', 'vine-boom-sound-70972')" title="Play Vine Boom Sound sound" type="button"></button>
+      <div class="loader" id="loader-70972"></div>
+      <a href="/en/instant/vine-boom-sound-70972/" class="instant-link link-secondary">Vine Boom Sound</a>
+    </div>
+    <div class="instant">
+      <div class="circle small-button-background" style="background-color:#00FF00;"></div>
+      <button class="small-button" onclick="play('/media/sounds/telefonum-calcaksa.mp3', 'loader-111', 'telefonum-calcaksa-boyle-calsin-111')" type="button"></button>
+      <a href="/en/instant/telefonum-calcaksa-boyle-calsin-111/" class="instant-link link-secondary">Telefonum &ccedil;alcaksa b&ouml;yle &ccedil;als&#305;n</a>
+    </div>
+    <div class="instant">
+      <button class="small-button" onclick="play('/media/sounds/de&#287;irmenci day&#305;.mp3', 'loader-222', 'degirmenci-dayi-bass-222')" type="button"></button>
+      <a href="/en/instant/degirmenci-dayi-bass-222/" class="instant-link link-secondary">
+        Değirmenci Dayı   BASS
+      </a>
+    </div>
+    <div class="instant">
+      <button class="small-button" onclick="play('/media/sounds/don\'t-stop.mp3', 'loader-333', 'dont-stop-333')" type="button"></button>
+      <a href="/en/instant/dont-stop-333/" class="instant-link link-secondary">Don't &lt;Stop&gt; &amp; Go</a>
+    </div>
+    <!-- aynı ses ikinci kez: tekrar sayılmamalı -->
+    <div class="instant">
+      <button class="small-button" onclick="play('/media/sounds/vine-boom.mp3', 'loader-70972', 'vine-boom-sound-70972')" type="button"></button>
+      <a href="/en/instant/vine-boom-sound-70972/" class="instant-link link-secondary">Vine Boom Sound</a>
+    </div>
+    <!-- tuşu olmayan kutu: atlanmalı -->
+    <div class="instant"><a href="/en/instant/broken-1/" class="instant-link">Broken</a></div>
+  </div>
+
+  <div class="pagination">
+    <a href="?page=2">Next</a>
+    <a href="/en/trending/tr/?page=50">Last</a>
+  </div>
+</body>
+</html>

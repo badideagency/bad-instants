@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Chrome'da http://localhost:8871 adresini açınca panelin içini (Console) görebilirsiniz. -->
+<ExtensionList>
+    <Extension Id="com.badidea.myinstants.panel">
+        <HostList>
+            <Host Name="PPRO" Port="8871"/>
+        </HostList>
+    </Extension>
+</ExtensionList>

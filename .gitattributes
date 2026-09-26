@@ -1,0 +1,3 @@
+# Windows betikleri CRLF satır sonlarıyla saklanır ve olduğu gibi kalır.
+*.bat -text
+*.ps1 -text
