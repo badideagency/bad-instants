@@ -128,6 +128,8 @@
     document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
   }
 
+  let hostVersion = ''; // Premiere sürümü (zaman birimi bu sürüme göre saklanır)
+
   function pingHost() {
     const setHost = (text, cls) => {
       el.hostText.textContent = text;
@@ -139,7 +141,10 @@
     }
     cs.evalScript('typeof mi_ping === "function" ? mi_ping() : "noscript"', (res) => {
       const r = String(res || '');
-      if (r.indexOf('ok|') === 0) setHost('Premiere ' + r.slice(3) + ' ✓', 'ok');
+      if (r.indexOf('ok|') === 0) {
+        hostVersion = r.slice(3);
+        setHost('Premiere ' + hostVersion + ' ✓', 'ok');
+      }
       else setHost('Premiere bağlantısı yok', 'bad');
     });
   }
@@ -312,24 +317,40 @@
     return box;
   }
 
-  function errorBox(err, retry) {
+  function errorBox(err, retry, title, onClose) {
     let kind = err.kind || 'server';
     if ((kind === 'server' || kind === 'timeout') && navigator.onLine === false) kind = 'offline';
     const box = document.createElement('div');
     box.className = 'msg error';
-    box.append(line('⚠', 'icon'), line(ERROR_TEXT[kind] || ERROR_TEXT.server));
-    const detail = [err.status ? 'HTTP ' + err.status : '', err.kind ? '' : err.message].filter(Boolean).join(' · ');
+    box.append(line('⚠', 'icon'));
+    if (title) box.append(line(title, 'title'));
+    box.append(line(err.userMessage || ERROR_TEXT[kind] || ERROR_TEXT.server));
+    const detail = err.detail || [err.status ? 'HTTP ' + err.status : '', err.kind ? '' : err.message].filter(Boolean).join(' · ');
     if (detail) box.append(line(detail, 'detail'));
-    box.append(button('Tekrar dene', 'retry', retry));
+    if (retry && !err.noRetry) box.append(button('Tekrar dene', 'retry', retry));
+    if (onClose) box.append(button('Kapat', 'retry', onClose));
     return box;
+  }
+
+  function closeNotice() {
+    state.notice = null;
+    renderNotice();
   }
 
   function renderNotice() {
     el.notice.replaceChildren();
     el.notice.hidden = !state.notice;
     if (!state.notice) return;
-    const { err, title, retry } = state.notice;
-    el.notice.append(err.kind === 'challenge' ? challengeBox(err, title, retry, 'ses yeniden denenir') : errorBox(err, retry));
+    const n = state.notice;
+    if (n.lines) {
+      el.notice.append(infoBox(n.title, n.lines));
+      return;
+    }
+    el.notice.append(
+      n.err.kind === 'challenge'
+        ? challengeBox(n.err, n.title, n.retry, n.after || 'ses yeniden denenir')
+        : errorBox(n.err, n.retry, n.title, closeNotice)
+    );
   }
 
   function rerenderMessages() {
@@ -456,6 +477,203 @@
     renderNotice();
   }
 
+  /* ------------------------------------------------------------------ İndir → import → timeline */
+
+  const DL_IDLE = '⬇ İndir';
+  const JOB_TEXT = {
+    nohost: 'Premiere bağlantısı yok (panel Premiere dışında açık).',
+    hostscript: 'Premiere komutu çalışmadı (host.jsx yüklenmemiş olabilir). Paneli kapatıp açın.',
+    hosttimeout: 'Premiere 60 saniye içinde cevap vermedi.',
+    noproject: 'Premiere’de açık bir proje yok.',
+    nosequence: 'Açık bir sequence yok. Timeline’da bir sequence açıp tekrar deneyin.',
+    nobin: 'Projede “MyInstants” bin’i oluşturulamadı.',
+    importfailed: 'Premiere dosyayı içe aktaramadı.',
+    noduration: 'Sesin süresi okunamadı.',
+    noplayhead: 'Playhead konumu okunamadı.',
+    notrack: 'Boş ses track’i yok ve yeni ses track’i eklenemedi. Timeline’a elle bir ses track’i ekleyip tekrar deneyin.',
+    placefailed: 'Ses hiçbir ses track’ine yerleştirilemedi (track türleri sese uymuyor olabilir).',
+    unitfailed: 'Ses playhead’e yerleştirilemedi: zaman birimi iki şekilde de tutmadı. Yanlış yere düşen klip silindi, timeline değişmedi. Bu durumu bildirin.',
+    damaged: 'DİKKAT: Yerleştirme mevcut bir klibi değiştirdi. Hemen Ctrl+Z ile geri alın ve bu durumu bildirin.',
+    cleanupfailed: 'DİKKAT: Yanlış yere düşen klip silinemedi. Ctrl+Z ile geri alın ve bu durumu bildirin.',
+    exception: 'Premiere tarafında beklenmeyen bir hata oldu.',
+    noperm: 'Dosya kaydedilemedi: klasöre yazma izni yok.',
+    nospace: 'Dosya kaydedilemedi: diskte yer yok.',
+    write: 'Dosya kaydedilemedi.',
+    read: 'Daha önce indirilen dosya okunamadı.',
+    nonode: 'Panel diske yazamıyor (Node.js kapalı). Kurulumu kontrol edin.',
+    toomany: 'Bu adla çok fazla dosya var; klasörü temizleyip tekrar deneyin.',
+  };
+  const NO_RETRY = ['damaged', 'cleanupfailed', 'unitfailed'];
+
+  function jobError(code, extra) {
+    const e = new Error(code);
+    e.kind = code;
+    e.userMessage = JOB_TEXT[code] || '';
+    e.noRetry = NO_RETRY.includes(code);
+    if (extra) Object.assign(e, extra);
+    return e;
+  }
+
+  // evalScript'i Promise'e çevirir; host fonksiyonları JSON döndürür.
+  function callHost(script, timeoutMs = 60000) {
+    return new Promise((resolve, reject) => {
+      if (!cs) {
+        reject(jobError('nohost'));
+        return;
+      }
+      let done = false;
+      const timer = setTimeout(() => {
+        if (!done) {
+          done = true;
+          reject(jobError('hosttimeout'));
+        }
+      }, timeoutMs);
+      cs.evalScript(script, (res) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        try {
+          resolve(JSON.parse(res));
+        } catch (e) {
+          reject(jobError('hostscript', { detail: String(res).slice(0, 200) }));
+        }
+      });
+    });
+  }
+
+  // Sesin süresini ölçer (Premiere süreyi okuyamazsa ya da daha kısa verirse kullanılır)
+  async function measureSeconds(arrayBuffer) {
+    try {
+      const Ctx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+      const buf = await new Ctx(1, 1, 44100).decodeAudioData(arrayBuffer.slice(0));
+      return buf.duration || 0;
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  function setDl(btn, mode, text) {
+    clearTimeout(btn._miTimer);
+    btn.classList.toggle('busy', mode === 'busy');
+    btn.classList.toggle('done', mode === 'done');
+    btn.textContent = mode === 'busy' ? '…' : mode === 'done' ? text : DL_IDLE;
+    if (mode === 'done') btn._miTimer = setTimeout(() => setDl(btn, 'idle'), 1800);
+  }
+
+  // Tıklamalar sırayla işlenir: her yerleştirme bir öncekinin kapladığı yeri görür.
+  let jobChain = Promise.resolve();
+
+  function queueDownload(item, btn) {
+    if (btn.classList.contains('busy')) return;
+    setDl(btn, 'busy');
+    jobChain = jobChain.then(() => runJob(item, btn));
+  }
+
+  async function runJob(item, btn) {
+    try {
+      const r = await downloadAndPlace(item);
+      setDl(btn, 'done', '✓ A' + r.track);
+      if (state.notice && state.notice.jobItem === item) closeNotice();
+      flash(`“${item.name}” → A${r.track}` + (r.addedTrack ? ' (yeni track)' : ''));
+    } catch (err) {
+      console.error('[MyInstants] İndir/yerleştir:', err);
+      setDl(btn, 'idle');
+      state.notice = {
+        err,
+        jobItem: item,
+        title: `“${item.name}” eklenemedi.`,
+        after: 'indirme yeniden denenir',
+        retry: () => queueDownload(item, btn),
+      };
+      if (err.kind === 'challenge') state.notice.title = 'İndirmek için site doğrulama istiyor.';
+      renderNotice();
+    }
+  }
+
+  async function downloadAndPlace(item) {
+    // 1) Premiere: açık proje, aktif sequence ve indirme klasörü (sequence yoksa hiçbir şey indirilmez)
+    const ctx = await callHost('mi_context()');
+    if (!ctx.ok) throw jobError(ctx.code, { detail: ctx.message || '' });
+    if (ctx.version) hostVersion = ctx.version;
+
+    // 2) Dosya: varsa indirme; yoksa tarayıcıyla indir, Node ile diske yaz
+    let target = null;
+    let seconds = 0;
+    try {
+      target = await LocalFiles.chooseTarget(ctx.folder, item.name, item.mp3);
+      if (target.exists) {
+        seconds = await measureSeconds(await LocalFiles.readFile(target.path));
+      } else {
+        const audio = await S.fetchAudio(item.mp3);
+        await LocalFiles.ensureDir(ctx.folder);
+        await LocalFiles.writeFileAtomic(target.path, audio.buffer);
+        seconds = await measureSeconds(audio.buffer);
+      }
+    } catch (e) {
+      if (e.kind && JOB_TEXT[e.kind]) throw jobError(e.kind, { detail: e.where || e.message });
+      if (!e.kind) throw jobError(target && target.exists ? 'read' : 'write', { detail: e.message });
+      throw e; // site hataları (doğrulama, bağlantı…) olduğu gibi
+    }
+    await LocalFiles.remember(ctx.folder, target.index, target.name, item.mp3);
+
+    // 3) Premiere: import (gerekirse) + boş track'e overwrite
+    const unitKey = 'timeUnit.' + (hostVersion || 'bilinmiyor');
+    const hint = store.get(unitKey, '');
+    const r = await callHost(
+      `mi_place(${JSON.stringify(target.path)}, ${Number(seconds) || 0}, ${JSON.stringify(hint)})`
+    );
+    if (r.ok) {
+      if (r.unit) store.set(unitKey, r.unit); // çalışan zaman birimi bu sürüm için saklanır
+      return r;
+    }
+    // Yerleştirme sorunlarında saklı birime güvenme: bir dahaki sefer yine önce tick denensin.
+    if (['unitfailed', 'damaged', 'cleanupfailed'].includes(r.code)) store.set(unitKey, '');
+    const detail = r.code === 'importfailed' ? target.path : r.message || (r.track ? 'A' + r.track : '');
+    throw jobError(r.code || 'exception', { detail });
+  }
+
+  /* ------------------------------------------------------------------ teşhis */
+
+  function infoBox(title, lines) {
+    const box = document.createElement('div');
+    box.className = 'msg info';
+    box.append(line(title, 'title'));
+    const pre = document.createElement('pre');
+    pre.textContent = lines.join('\n');
+    box.append(pre, button('Kapat', 'retry', closeNotice));
+    return box;
+  }
+
+  async function runDiagnostics() {
+    const yes = (v) => (v ? 'var' : 'YOK');
+    const lines = [];
+    try {
+      const d = await callHost('mi_diag()', 20000);
+      if (d.version) hostVersion = d.version;
+      lines.push('Premiere: ' + (d.version || '?'));
+      if (!d.hasSequence) lines.push('Aktif sequence: YOK');
+      else {
+        lines.push(`Aktif sequence: ${d.sequence} (${d.audioTracks} ses track'i, kare = ${d.timebase} tick)`);
+        lines.push('Kilit bilgisi (DOM isLocked): ' + yes(d.domIsLocked));
+        lines.push('Kilit bilgisi (QE isLocked): ' + yes(d.qeIsLocked));
+        lines.push('Track ekleme (QE addTracks): ' + yes(d.qeAddTracks));
+        lines.push('Projede dosya arama (findItemsMatchingMediaPath): ' + yes(d.findByPath));
+      }
+      if (d.error) lines.push('Hata: ' + d.error);
+    } catch (e) {
+      lines.push('Premiere: ' + (e.userMessage || e.message));
+    }
+    const unit = store.get('timeUnit.' + (hostVersion || 'bilinmiyor'), '');
+    lines.push('Zaman birimi (bu sürüm): ' + (unit === 'ticks' ? 'tick (metin)' : unit === 'seconds' ? 'saniye' : 'henüz denenmedi'));
+    lines.push('Panel: 0.2.0');
+    state.notice = { title: 'Teşhis', lines };
+    renderNotice();
+    console.log('[MyInstants] Teşhis:\n' + lines.join('\n'));
+  }
+
+  el.hostText.title = 'Tıklayın: teşhis';
+  el.hostText.addEventListener('click', runDiagnostics);
+
   /* ------------------------------------------------------------------ liste */
 
   function makeRow(item) {
@@ -470,10 +688,12 @@
     const dl = document.createElement('button');
     dl.type = 'button';
     dl.className = 'dl';
-    dl.textContent = '⬇ İndir';
-    // "disabled" yerine aria-disabled: devre dışı düğmeler fare olaylarını yutup önizlemeyi bozabiliyor.
-    dl.setAttribute('aria-disabled', 'true');
-    dl.title = 'İndirme Aşama 2’de eklenecek';
+    dl.textContent = DL_IDLE;
+    dl.title = 'İndir ve aktif sequence’te playhead’e koy';
+    dl.addEventListener('click', (e) => {
+      e.stopPropagation();
+      queueDownload(item, dl);
+    });
 
     row.append(name, dl);
     row.addEventListener('mouseenter', () => preview.hoverStart(row, item));
@@ -726,5 +946,5 @@
   loadList(true);
 
   // Hata ayıklama ve testler için
-  window.MyInstantsPanel = { state, preview, loadList, verify };
+  window.MyInstantsPanel = { state, preview, loadList, verify, runDiagnostics };
 })();

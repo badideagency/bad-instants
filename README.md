@@ -1,7 +1,27 @@
 # MyInstants — Premiere Pro paneli
 
 Premiere Pro 2026 (Windows) için CEP paneli. myinstants.com'daki sesleri listeler, arar,
-fareyle üstüne gelince önizleme çalar. (İndirip timeline'a koyma: Aşama 2.)
+fareyle üstüne gelince önizleme çalar; **⬇ İndir** sesi indirip aktif sequence'te playhead'e koyar.
+
+## İndir tuşu ne yapar
+
+1. Açık proje ve aktif sequence yoksa uyarır, hiçbir şey indirmez.
+2. Klasör: projenin (.prproj) yanındaki `MyInstants`; proje kaydedilmemişse `Belgeler\MyInstants`.
+3. Dosya adı ses adından türetilir (Windows'ta geçersiz karakterler temizlenir, Türkçe korunur).
+   Dosya zaten varsa tekrar indirilmez. Aynı adda farklı bir ses gelirse `Ad (2).mp3` olur
+   (hangi dosyanın hangi sese ait olduğu klasördeki `.myinstants.json` dosyasında tutulur).
+4. İndirme panelin tarayıcısıyla yapılır; Node yalnızca diske yazar (önce geçici dosyaya, sonra asıl adına).
+5. Premiere: dosya projede zaten varsa (yol eşleşmesi) mevcut öğe kullanılır; yoksa `MyInstants` bin'ine import edilir.
+6. A1'den başlayarak kilitsiz ve `[playhead, playhead + süre]` aralığı tamamen boş ilk ses track'i seçilir;
+   ses oraya **overwriteClip** ile konur (insert asla kullanılmaz). Boş track yoksa en alta yeni ses track'i eklenir.
+7. Güvenlik: koymadan önce ve sonra bütün ses track'leri karşılaştırılır. Yeni klip yanlış yere düştüyse
+   panel kendi klibini (ripple olmadan) siler ve diğer zaman birimiyle bir kez daha dener; mevcut bir klip
+   değiştiyse durur ve "Ctrl+Z ile geri alın" der. Çalışan zaman birimi Premiere sürümü başına saklanır.
+
+Geri alma (Ctrl+Z): Premiere'in ExtendScript'inde işlemleri tek adımda toplama imkânı yok.
+Bin var + dosya daha önce import edilmiş → 1 adım; dosya yeni → 2; projede ilk kullanım → 3; yeni track eklendiyse +1.
+
+Teşhis: alt çubuktaki yeşil "Premiere … ✓" yazısına tıklayın (kilit bilgisi, track ekleme, zaman birimi).
 
 ## Siteye nasıl bağlanır
 
@@ -22,9 +42,10 @@ extension/            ← Premiere'e bağlanan panel klasörü
   CSXS/manifest.xml   ← panel tanımı (PPRO [26.0,99.9], CEP 12, Node.js açık)
   index.html, css/    ← görünüm
   js/siteScraper.js   ← myinstants.com'u okuyan TEK dosya (site değişirse yalnız burası düzeltilir)
-  js/main.js          ← arayüz davranışı
+  js/localFiles.js    ← diske yazma, dosya adı kuralları (Node)
+  js/main.js          ← arayüz davranışı, İndir iş sırası
   js/CSInterface.js   ← Adobe'nin resmi CEP 12 dosyası
-  jsx/host.jsx        ← Premiere tarafı (ExtendScript)
+  jsx/host.jsx        ← Premiere tarafı (ExtendScript, ES3): import, boş track bulma, overwrite, teşhis
   .debug              ← hata ayıklama portu (8871)
 install.bat           ← paneli kurar (bağlantı/junction ile)
 uninstall.bat         ← paneli kaldırır
@@ -69,8 +90,9 @@ Panel Premiere'de açıkken Chrome'da `http://localhost:8871` → panelin Consol
 
 ```
 npm install
-npm test          # siteScraper: HTML okuma, adresler, Cloudflare sayfasını tanıma, hata türleri, önbellek
+npm test          # siteScraper, localFiles ve host.jsx (sahte Premiere içinde; ES3 uyumu dahil)
 npm run test:ui   # paneli manifest'teki CEF ayarlarıyla headless Chromium'da açar; www.myinstants.com adını
                   # Cloudflare benzeri sahte bir siteye (tests/fake-site.js) yönlendirip gerçek fetch yolunu,
                   # Doğrula penceresini, çerez paylaşımını ve yeniden açılışta çerezin kalmasını dener
+npm run test:stage2 # İndir → diske yaz → import → timeline akışı (sahte site + sahte Premiere + sahte disk)
 ```

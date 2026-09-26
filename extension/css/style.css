@@ -177,8 +177,10 @@ button { cursor: pointer; }
   white-space: nowrap;
 }
 .dl:hover { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
-.dl[aria-disabled="true"] { opacity: 0.4; cursor: not-allowed; }
-.dl[aria-disabled="true"]:hover { background: var(--bg-raised); border-color: var(--border); color: inherit; }
+.dl { min-width: 54px; }
+.dl.busy { cursor: progress; color: var(--text-dim); }
+.dl.busy:hover { background: var(--bg-raised); border-color: var(--border); color: var(--text-dim); }
+.dl.done { background: var(--ok); border-color: var(--ok); color: #fff; }
 
 /* ---------- liste sonu: yükleniyor / daha fazla / hata ---------- */
 .list-end { padding: 8px; text-align: center; color: var(--text-dim); }
@@ -234,6 +236,8 @@ button { cursor: pointer; }
   white-space: nowrap;
 }
 #statusText { overflow: hidden; text-overflow: ellipsis; }
+#hostText { cursor: pointer; }
+#hostText:hover { text-decoration: underline; }
 #hostText.ok { color: var(--ok); }
 #hostText.bad { color: var(--danger); }
 
@@ -242,3 +246,16 @@ button { cursor: pointer; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border: 2px solid var(--bg); border-radius: 5px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+
+/* teşhis kutusu */
+.msg.info { text-align: left; }
+.msg.info pre {
+  margin: 4px 0 0;
+  padding: 6px;
+  background: var(--bg-sunken);
+  border-radius: 3px;
+  font: 11px/1.4 Consolas, "Cascadia Mono", monospace;
+  white-space: pre-wrap;
+  user-select: text;
+}
+.msg.info .retry { display: block; margin: 8px auto 0; }
