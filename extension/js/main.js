@@ -7,6 +7,7 @@
 
   const S = window.SiteScraper;
   const HOVER_DELAY_MS = 150;
+  const PANEL_STARTED_AT = Date.now();
   const TABS = ['trending', 'best', 'recent', 'category'];
   const TAB_TITLES = {
     trending: 'Trending',
@@ -19,11 +20,12 @@
     offline: 'İnternet bağlantısı yok gibi görünüyor. Bağlantınızı kontrol edip tekrar deneyin.',
     timeout: 'myinstants.com cevap vermiyor (zaman aşımı). Biraz sonra tekrar deneyin.',
     server: 'myinstants.com şu an cevap vermiyor. Biraz sonra tekrar deneyin.',
-    blocked: 'myinstants.com isteği geri çevirdi (güvenlik kontrolü). Birkaç dakika sonra tekrar deneyin.',
-    tls: 'Siteyle güvenli bağlantı kurulamadı. Antivirüs ya da ağ ayarları engelliyor olabilir.',
+    busy: 'Site çok fazla istek aldığını söylüyor. Bir dakika bekleyip tekrar deneyin.',
+    cors: 'Panel siteye bağlanamıyor: tarayıcı güvenlik ayarı (--disable-web-security) etkin değil. Premiere’i tamamen kapatıp açın; sürerse bu durumu bildirin.',
+    nofetch: 'Panelin tarayıcısı istek atamıyor. Bu durumu bildirin.',
     notfound: 'Bu sayfa sitede bulunamadı.',
     parse: 'Sayfa açıldı ama içinde ses bulunamadı. Sitenin yapısı değişmiş olabilir.',
-    nonode: 'Panel internete çıkamıyor (Node.js kapalı). Kurulumu kontrol edin.',
+    notaudio: 'Siteden gelen dosya ses değil.',
   };
 
   const $ = (id) => document.getElementById(id);
@@ -41,6 +43,7 @@
     searchBar: $('searchBar'),
     searchLabel: $('searchLabel'),
     searchExit: $('searchExit'),
+    notice: $('notice'),
     list: $('list'),
     rows: $('rows'),
     listEnd: $('listEnd'),
@@ -83,8 +86,10 @@
     seen: new Set(),
     hasMore: false,
     loading: false,
-    error: null,
+    error: null, // { err, reset } — listenin sonunda gösterilen hata
+    notice: null, // { err, title, retry } — listenin üstünde gösterilen uyarı (ör. önizleme doğrulaması)
     token: 0,
+    flash: '', // durum çubuğunda kısa süre görünen bilgi
   };
 
   /* ------------------------------------------------------------------ Premiere bağlantısı */
@@ -139,6 +144,199 @@
     });
   }
 
+  /* ------------------------------------------------------------------ Cloudflare doğrulaması */
+
+  // Doğrula tuşu myinstants.com'u window.open ile PANELİN KENDİ Chromium'unda açar; böylece orada
+  // alınan Cloudflare çerezi paneldeki isteklerde de geçerli olur. (Sistem tarayıcısı KULLANILMAZ:
+  // onun çerezleri ayrıdır.) Pencere kapanınca bekleyen istek otomatik tekrarlanır.
+  const verify = {
+    win: null,
+    timer: null,
+    retry: null,
+    openFailed: false,
+    justVerified: false, // son doğrulamadan sonraki ilk deneme sürüyor / başarısız oldu
+  };
+
+  function openVerifyWindow(url, retry) {
+    verify.retry = retry;
+    verify.justVerified = false;
+    if (verify.win && !isClosed(verify.win)) {
+      try {
+        verify.win.focus();
+      } catch (e) {
+        /* yoksay */
+      }
+      return;
+    }
+    let w = null;
+    try {
+      w = window.open(url || S.BASE + '/', 'myinstants-verify', 'width=460,height=640,resizable=yes,scrollbars=yes');
+    } catch (e) {
+      w = null;
+    }
+    if (!w) {
+      verify.openFailed = true;
+      console.warn('[MyInstants] Doğrulama penceresi açılamadı (window.open null döndü)');
+      rerenderMessages();
+      return;
+    }
+    verify.openFailed = false;
+    verify.win = w;
+    clearInterval(verify.timer);
+    verify.timer = setInterval(() => {
+      if (isClosed(w)) finishVerify();
+    }, 500);
+    rerenderMessages();
+  }
+
+  function isClosed(w) {
+    try {
+      return w.closed;
+    } catch (e) {
+      return true;
+    }
+  }
+
+  // Pencere kapandı (ya da kullanıcı "Doğrulamayı bitirdim" dedi) → bekleyen isteği tekrarla
+  function finishVerify() {
+    clearInterval(verify.timer);
+    verify.timer = null;
+    if (verify.win && !isClosed(verify.win)) {
+      try {
+        verify.win.close();
+      } catch (e) {
+        /* yoksay */
+      }
+    }
+    verify.win = null;
+    verify.justVerified = true;
+    const retry = verify.retry;
+    verify.retry = null;
+    rerenderMessages();
+    if (retry) retry();
+  }
+
+  // Bir istek doğrulama istemeden başarılı olunca çağrılır (çerez kalıcılığı teşhisi için).
+  function noteSuccess() {
+    if (verify.justVerified) {
+      verify.justVerified = false;
+      store.set('verifiedAt', Date.now());
+      flash('Doğrulama tamam ✓');
+      return;
+    }
+    const at = Number(store.get('verifiedAt', '0'));
+    if (at && at < PANEL_STARTED_AT && !noteSuccess.reported) {
+      noteSuccess.reported = true;
+      flash(`Doğrulama istenmedi (son doğrulama ${ago(at)})`);
+    }
+  }
+
+  function ago(t) {
+    const m = Math.round((Date.now() - t) / 60000);
+    if (m < 1) return 'az önce';
+    if (m < 60) return m + ' dk önce';
+    const h = Math.round(m / 60);
+    if (h < 48) return h + ' sa önce';
+    return Math.round(h / 24) + ' gün önce';
+  }
+
+  function flash(text) {
+    state.flash = text;
+    renderStatus();
+    clearTimeout(flash.timer);
+    flash.timer = setTimeout(() => {
+      state.flash = '';
+      renderStatus();
+    }, 8000);
+  }
+
+  function button(text, cls, onClick) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = cls;
+    b.textContent = text;
+    b.addEventListener('click', onClick);
+    return b;
+  }
+
+  function line(text, cls) {
+    const d = document.createElement('div');
+    if (cls) d.className = cls;
+    d.textContent = text;
+    return d;
+  }
+
+  // "Site doğrulama istiyor" kutusu. after: pencere kapanınca ne olacağı (liste yenilenir / ses denenir)
+  function challengeBox(err, title, retry, after = 'liste kendiliğinden yenilenir') {
+    const box = document.createElement('div');
+    box.className = 'msg error challenge';
+    box.append(line('⚠', 'icon'), line(title || 'Site doğrulama istiyor.', 'title'));
+
+    if (verify.win && !isClosed(verify.win)) {
+      box.append(
+        line(`Doğrulama penceresi açık. Oradaki adımı tamamlayıp pencereyi kapatın; ${after}.`),
+        button('Doğrulamayı bitirdim', 'retry', finishVerify)
+      );
+      return box;
+    }
+
+    if (verify.openFailed) {
+      box.append(line('Doğrulama penceresi açılamadı: Premiere yeni pencereye izin vermedi. Bu durumu bildirin.'));
+    } else if (verify.justVerified) {
+      box.append(
+        line(
+          err.hardBlock
+            ? 'Doğrulamadan sonra site hâlâ engelliyor (“Sorry, you have been blocked”). Doğrulama bu engeli kaldırmıyor; bu durumu bildirin.'
+            : 'Doğrulamadan sonra site hâlâ doğrulama istiyor. Penceredeki adımı tamamladığınızdan emin olun; sürerse bu durumu bildirin.'
+        )
+      );
+    } else {
+      box.append(
+        line(
+          `Doğrula tuşu myinstants.com’u küçük bir pencerede açar. Oradaki “insan olduğunuzu doğrulayın” adımını tamamlayıp pencereyi kapatın; ${after}.`
+        )
+      );
+      const at = Number(store.get('verifiedAt', '0'));
+      if (at && at < PANEL_STARTED_AT) {
+        box.append(
+          line(
+            `Not: En son ${ago(at)} doğrulamıştınız. Panel/Premiere yeniden açılınca doğrulama korunmamış (çerez silinmiş ya da süresi dolmuş).`,
+            'detail'
+          )
+        );
+        console.warn('[MyInstants] Önceki doğrulama bu oturumda geçerli değil. verifiedAt=' + new Date(at).toISOString());
+      }
+    }
+    box.append(button('Doğrula', 'retry primary', () => openVerifyWindow(err.url, retry)));
+    if (err.status) box.append(line('HTTP ' + err.status + (err.hardBlock ? ' · engel sayfası' : ' · doğrulama sayfası'), 'detail'));
+    return box;
+  }
+
+  function errorBox(err, retry) {
+    let kind = err.kind || 'server';
+    if ((kind === 'server' || kind === 'timeout') && navigator.onLine === false) kind = 'offline';
+    const box = document.createElement('div');
+    box.className = 'msg error';
+    box.append(line('⚠', 'icon'), line(ERROR_TEXT[kind] || ERROR_TEXT.server));
+    const detail = [err.status ? 'HTTP ' + err.status : '', err.kind ? '' : err.message].filter(Boolean).join(' · ');
+    if (detail) box.append(line(detail, 'detail'));
+    box.append(button('Tekrar dene', 'retry', retry));
+    return box;
+  }
+
+  function renderNotice() {
+    el.notice.replaceChildren();
+    el.notice.hidden = !state.notice;
+    if (!state.notice) return;
+    const { err, title, retry } = state.notice;
+    el.notice.append(err.kind === 'challenge' ? challengeBox(err, title, retry, 'ses yeniden denenir') : errorBox(err, retry));
+  }
+
+  function rerenderMessages() {
+    renderNotice();
+    renderListEnd();
+  }
+
   /* ------------------------------------------------------------------ önizleme */
 
   const preview = (function () {
@@ -146,10 +344,13 @@
     audio.preload = 'auto';
     let timer = null;
     let row = null;
+    let item = null;
+    let onFail = null;
 
     function release() {
       if (row) row.classList.remove('playing', 'buffering');
       row = null;
+      item = null;
     }
 
     function stop() {
@@ -163,23 +364,25 @@
       }
     }
 
-    function fail(r) {
+    function fail(r, it) {
       r.classList.remove('playing', 'buffering');
       r.classList.add('error');
+      if (onFail) onFail(it);
     }
 
-    function play(r, item) {
+    function play(r, it) {
       stop();
       row = r;
+      item = it;
       r.classList.remove('error');
       r.classList.add('playing', 'buffering');
-      audio.src = item.mp3;
+      audio.src = it.mp3; // doğrudan sitenin adresi
       const p = audio.play();
       if (p && p.catch) {
         p.catch((err) => {
-          if (row === r && err && err.name !== 'AbortError') {
+          if (row === r && err && err.name !== 'AbortError' && err.name !== 'NotSupportedError') {
             release();
-            fail(r);
+            fail(r, it);
           }
         });
       }
@@ -192,15 +395,16 @@
     audio.addEventListener('error', () => {
       if (row && audio.getAttribute('src')) {
         const r = row;
+        const it = item;
         release();
-        fail(r);
+        fail(r, it);
       }
     });
 
     return {
-      hoverStart(r, item) {
+      hoverStart(r, it) {
         clearTimeout(timer);
-        timer = setTimeout(() => play(r, item), HOVER_DELAY_MS);
+        timer = setTimeout(() => play(r, it), HOVER_DELAY_MS);
       },
       hoverEnd(r) {
         clearTimeout(timer);
@@ -211,11 +415,46 @@
       setVolume(v) {
         audio.volume = Math.max(0, Math.min(1, v));
       },
+      onFail(fn) {
+        onFail = fn;
+      },
       get audio() {
         return audio;
       },
     };
   })();
+
+  // Bir ses çalınamazsa aynı adresi tarayıcıyla kontrol et: sebep Cloudflare doğrulamasıysa söyle.
+  preview.onFail(async (item) => {
+    if (!item) return;
+    try {
+      await S.fetchAudio(item.mp3);
+    } catch (err) {
+      console.warn('[MyInstants] Önizleme çalınamadı:', item.mp3, err);
+      if (err.kind === 'challenge') showAudioChallenge(item, err);
+    }
+  });
+
+  function showAudioChallenge(item, err) {
+    state.notice = {
+      err,
+      title: 'Ses çalınamadı: site doğrulama istiyor.',
+      // Doğrulama penceresi kapanınca aynı sesi tekrar dene
+      retry: async () => {
+        try {
+          await S.fetchAudio(item.mp3);
+          state.notice = null;
+          el.rows.querySelectorAll('.row.error').forEach((r) => r.classList.remove('error'));
+          noteSuccess();
+        } catch (e) {
+          if (e.kind === 'challenge') showAudioChallenge(item, e);
+          else state.notice = null;
+        }
+        renderNotice();
+      },
+    };
+    renderNotice();
+  }
 
   /* ------------------------------------------------------------------ liste */
 
@@ -256,46 +495,20 @@
 
     if (state.error) {
       const { err, reset } = state.error;
-      let kind = err.kind || 'server';
-      if ((kind === 'server' || kind === 'timeout') && navigator.onLine === false) kind = 'offline';
-
-      const box = document.createElement('div');
-      box.className = 'msg error';
-      const icon = document.createElement('span');
-      icon.className = 'icon';
-      icon.textContent = '⚠';
-      const text = document.createElement('div');
-      text.textContent = ERROR_TEXT[kind] || ERROR_TEXT.server;
-      const detail = document.createElement('div');
-      detail.className = 'detail';
-      detail.textContent = [err.status ? 'HTTP ' + err.status : '', err.code || '', err.kind ? '' : err.message]
-        .filter(Boolean)
-        .join(' · ');
-      const retry = document.createElement('button');
-      retry.type = 'button';
-      retry.className = 'retry';
-      retry.textContent = 'Tekrar dene';
-      retry.addEventListener('click', () => loadList(reset));
-      box.append(icon, text, detail, retry);
-      end.append(box);
+      const retry = () => loadList(reset);
+      end.append(err.kind === 'challenge' ? challengeBox(err, null, retry) : errorBox(err, retry));
       return;
     }
 
     if (state.count === 0) {
-      const m = document.createElement('div');
-      m.className = 'msg';
-      m.textContent = state.tab === 'search' ? `“${state.query}” için sonuç bulunamadı.` : 'Bu listede ses yok.';
-      end.append(m);
+      end.append(
+        line(state.tab === 'search' ? `“${state.query}” için sonuç bulunamadı.` : 'Bu listede ses yok.', 'msg')
+      );
       return;
     }
 
     if (state.hasMore) {
-      const more = document.createElement('button');
-      more.type = 'button';
-      more.className = 'more-btn';
-      more.textContent = 'Daha fazla';
-      more.addEventListener('click', () => loadList(false));
-      end.append(more);
+      end.append(button('Daha fazla', 'more-btn', () => loadList(false)));
       return;
     }
 
@@ -303,6 +516,10 @@
   }
 
   function renderStatus() {
+    if (state.flash) {
+      el.statusText.textContent = state.flash;
+      return;
+    }
     const parts = [TAB_TITLES[state.tab]];
     if (state.tab === 'category' && state.categories) {
       const c = state.categories.find((x) => x.id === state.category);
@@ -372,6 +589,7 @@
       state.page = page;
       state.count += fresh.length;
       state.hasMore = res.hasMore && fresh.length > 0;
+      noteSuccess();
     } catch (err) {
       if (token !== state.token) return;
       console.error('[MyInstants]', err);
@@ -477,6 +695,8 @@
   el.refreshBtn.addEventListener('click', () => {
     S.clearCache();
     if (state.tab === 'category') state.categories = null;
+    state.notice = null;
+    renderNotice();
     pingHost();
     loadList(true);
   });
@@ -506,5 +726,5 @@
   loadList(true);
 
   // Hata ayıklama ve testler için
-  window.MyInstantsPanel = { state, preview, loadList };
+  window.MyInstantsPanel = { state, preview, loadList, verify };
 })();

@@ -211,8 +211,15 @@ button { cursor: pointer; }
 .msg.error { color: var(--text); }
 .msg.error .icon { display: block; margin-bottom: 4px; color: var(--danger); font-size: 16px; }
 .msg .detail { margin-top: 4px; color: var(--text-dim); font-size: 10px; user-select: text; }
-.msg .retry { margin-top: 8px; padding: 2px 12px; background: var(--bg-raised); border: 1px solid var(--border); border-radius: 3px; }
+.msg .title { font-weight: 600; color: var(--text-strong); margin-bottom: 4px; }
+.msg .retry { margin: 8px 3px 0; padding: 2px 12px; background: var(--bg-raised); border: 1px solid var(--border); border-radius: 3px; }
 .msg .retry:hover { background: var(--bg-hover); }
+.msg .retry.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+.msg .retry.primary:hover { filter: brightness(1.1); }
+
+/* listenin üstündeki uyarı (ör. önizleme için doğrulama) */
+.notice { border-bottom: 1px solid var(--border); background: var(--bg-raised); text-align: center; }
+.notice .msg { padding: 8px; }
 
 /* ---------- alt durum çubuğu ---------- */
 .status {

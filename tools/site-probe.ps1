@@ -1,4 +1,7 @@
-﻿# MyInstants — site kontrol aracı
+﻿# MyInstants — site kontrol aracı (YALNIZ TEŞHİS)
+#
+# DİKKAT: PowerShell panelden farklı bir istemcidir; Cloudflare ona farklı davranabilir.
+# Bu raporun sonucu panelin çalışıp çalışmayacağını göstermez. Asıl test panelin kendisidir.
 #
 # myinstants.com sayfalarını SİZİN bilgisayarınızdan indirir ve panelin kullandığı
 # yapıyı (ses kutuları, mp3 adresleri, sayfalama, kategori linkleri, bölge kodları) raporlar.

@@ -5,7 +5,7 @@
   "description": "MyInstants — Premiere Pro (CEP) paneli. Bu dosya yalnızca geliştirme testleri içindir; panelin çalışması için gerekmez.",
   "scripts": {
     "test": "node --test tests/*.test.js",
-    "test:ui": "node tests/ui-smoke.js"
+    "test:ui": "node tests/panel-e2e.js"
   },
   "devDependencies": {
     "jsdom": "^26.1.0",

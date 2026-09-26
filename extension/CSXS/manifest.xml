@@ -27,6 +27,12 @@
                     <CEFCommandLine>
                         <Parameter>--enable-nodejs</Parameter>
                         <Parameter>--mixed-context</Parameter>
+                        <!-- Siteye panelin kendi Chromium'uyla (fetch) istek atabilmek için: CORS kapalı -->
+                        <Parameter>--disable-web-security</Parameter>
+                        <!-- Adobe'nin CEP 11+ için önerdiği ayar (başka sitelerle ilgili pencere/çerçeve sorunları) -->
+                        <Parameter>--disable-site-isolation-trials</Parameter>
+                        <!-- Oturum çerezleri panel kapanınca silinmesin (Cloudflare doğrulaması korunsun) -->
+                        <Parameter>--persist-session-cookies</Parameter>
                         <!-- Fareyle üstüne gelince (tıklamadan) önizleme çalabilmek için -->
                         <Parameter>--autoplay-policy=no-user-gesture-required</Parameter>
                     </CEFCommandLine>

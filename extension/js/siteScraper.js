@@ -1,12 +1,13 @@
 /*
  * siteScraper.js
  *
- * myinstants.com ile ilgili HER ŞEY bu dosyada: adresler, sayfa indirme, HTML'i okuma, önbellek.
- * Site değişirse yalnızca bu dosya düzeltilir.
+ * myinstants.com ile ilgili HER ŞEY bu dosyada: adresler, sayfa/ses indirme, Cloudflare
+ * doğrulama sayfasını tanıma, HTML'i okuma, önbellek. Site değişirse yalnızca bu dosya düzeltilir.
  *
- * Panelde (CEP, --enable-nodejs --mixed-context) sayfaları Node'un https modülüyle indirir
- * (tarayıcı fetch'i CORS'a takılır), HTML'i Chromium'un DOMParser'ı ile okur.
- * Testlerde Node + jsdom ile çalışır.
+ * Bütün istekler panelin kendi Chromium'uyla yapılır (window.fetch, credentials: 'include').
+ * Böylece "Doğrula" penceresinde alınan Cloudflare çerezi bu isteklerde de kullanılır.
+ * CORS'u aşmak için manifest'te --disable-web-security açıktır. Node siteye istek ATMAZ.
+ * HTML, Chromium'un DOMParser'ı ile okunur. Testlerde Node (fetch + jsdom) ile çalışır.
  *
  * Sitenin beklenen yapısı (her ses için):
  *   <div class="instant">
@@ -23,9 +24,6 @@
   'use strict';
 
   const BASE = 'https://www.myinstants.com';
-  const USER_AGENT =
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
-  const MAX_REDIRECTS = 5;
   const MAX_CACHED_PAGES = 60;
   let timeoutMs = 15000;
 
@@ -76,7 +74,7 @@
 
   /* ------------------------------------------------------------------ hatalar */
 
-  // kind: offline | timeout | server | blocked | tls | notfound | parse | nonode
+  // kind: offline | timeout | server | cors | challenge | notfound | busy | parse | notaudio | nofetch
   function scraperError(kind, message, extra) {
     const e = new Error(message || kind);
     e.kind = kind;
@@ -84,120 +82,135 @@
     return e;
   }
 
-  const OFFLINE_CODES = ['ENOTFOUND', 'EAI_AGAIN', 'ENETUNREACH', 'ENETDOWN', 'EHOSTUNREACH', 'EHOSTDOWN'];
-
-  function classifyNetError(err) {
-    if (err && err.kind) return err;
-    const code = (err && err.code) || '';
-    const message = (err && err.message) || 'Bağlantı hatası';
-    if (OFFLINE_CODES.includes(code)) return scraperError('offline', message, { code });
-    if (code === 'ETIMEDOUT') return scraperError('timeout', message, { code });
-    if (/CERT|SSL|TLS|SELF_SIGNED|UNABLE_TO_VERIFY/i.test(code + ' ' + message)) {
-      return scraperError('tls', message, { code });
-    }
-    return scraperError('server', message, { code });
+  function httpStatusError(status, url) {
+    if (status === 404) return scraperError('notfound', 'HTTP 404', { status, url });
+    if (status === 429) return scraperError('busy', 'HTTP 429 (çok fazla istek)', { status, url });
+    return scraperError('server', `HTTP ${status}`, { status, url });
   }
 
-  // Cloudflare'in "engellendiniz" / "bir dakika" sayfaları
-  function looksLikeBlockPage(body) {
-    return (
-      /<title>\s*(Attention Required|Just a moment|Access denied)/i.test(body) ||
-      /id="cf-error-details"|cf_chl_opt/i.test(body)
+  /* ------------------------------------------------------------------ Cloudflare ara sayfası */
+
+  // Cloudflare'in kendi sayfa başlıkları. Başlığın TAMAMI eşleşmeli: "Just a moment" adlı bir sesin
+  // arama sayfası ("Just a moment Soundboard - ... | Myinstants") yanlışlıkla doğrulama sanılmasın.
+  const CF_TITLES = [
+    /^Just a moment(?:\.{3}|…)?$/i,
+    /^Attention Required! \| Cloudflare$/i,
+    /^Checking your browser/i,
+    /^Please Wait\.{3} \| Cloudflare$/i,
+    /^Access denied \| .+ used Cloudflare/i,
+  ];
+  // Doğrulama sayfasının gövdesindeki "cf-" izleri. Cloudflare normal sayfalara da
+  // /cdn-cgi/challenge-platform/scripts/... betiği ekleyebildiği için bu izler yalnızca
+  // hata kodlu (200 olmayan) cevaplarda dikkate alınır.
+  const CF_MARKS = /cf_chl_opt|cf-chl-|id="cf-error-details"|id="challenge-form"|cf-browser-verification|\/cdn-cgi\/challenge-platform\/h\/|cf-turnstile/i;
+  // Doğrulamayla aşılamayan kesin engel ("Sorry, you have been blocked", hata 1020)
+  const CF_HARD_BLOCK = /you have been blocked|data-translate="block_headline"|error code:?\s*1020/i;
+
+  function headerValue(headers, name) {
+    if (!headers) return '';
+    if (typeof headers.get === 'function') return headers.get(name) || '';
+    return headers[name] || headers[name.toLowerCase()] || '';
+  }
+
+  // Cevap bir Cloudflare ara sayfasıysa { hardBlock } döner, değilse null.
+  function detectCloudflare(status, headers, body) {
+    const text = String(body || '');
+    const title = cleanText((/<title[^>]*>([\s\S]*?)<\/title>/i.exec(text) || [])[1] || '');
+    const mitigated = /challenge/i.test(headerValue(headers, 'cf-mitigated'));
+    const byTitle = CF_TITLES.some((re) => re.test(title));
+    const byMarks = status !== 200 && CF_MARKS.test(text);
+    if (!mitigated && !byTitle && !byMarks) return null;
+    return { hardBlock: CF_HARD_BLOCK.test(text), title };
+  }
+
+  function challengeError(url, status, cf) {
+    return scraperError('challenge', cf.hardBlock ? 'Cloudflare engeli' : 'Cloudflare doğrulaması', {
+      url,
+      status,
+      hardBlock: cf.hardBlock,
+    });
+  }
+
+  /* ------------------------------------------------------------------ tarayıcı istekleri */
+
+  function doFetch(url, signal, extra) {
+    if (typeof root.fetch !== 'function') throw scraperError('nofetch', 'Tarayıcı fetch() yok');
+    return root.fetch(
+      url,
+      Object.assign({ credentials: 'include', cache: 'no-store', redirect: 'follow', signal }, extra)
     );
   }
 
-  function httpStatusError(status, body, headers) {
-    const extra = { status };
-    const cloudflare = /cloudflare/i.test((headers && headers.server) || '');
-    if (looksLikeBlockPage(body) || (status === 403 && cloudflare)) {
-      return scraperError('blocked', `HTTP ${status} (güvenlik kontrolü)`, extra);
+  // fetch() yalnızca "Failed to fetch" der; sebebi ayırmaya çalışır.
+  async function classifyFetchFailure(url, err) {
+    const nav = root.navigator;
+    if (nav && nav.onLine === false) return scraperError('offline', 'Ağ bağlantısı yok', { url });
+    // Aynı adrese "no-cors" ile ulaşılabiliyorsa sunucu ayakta; asıl engel tarayıcının
+    // güvenlik kuralıdır (CORS) → manifest'teki --disable-web-security çalışmıyor demektir.
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 5000);
+    try {
+      await doFetch(url, ctrl.signal, { mode: 'no-cors' });
+      return scraperError('cors', 'Tarayıcı güvenlik kuralı isteği engelledi (CORS)', { url });
+    } catch (e) {
+      return scraperError('server', (err && err.message) || 'Bağlantı kurulamadı', { url });
+    } finally {
+      clearTimeout(timer);
     }
-    if (status === 429) return scraperError('blocked', 'HTTP 429 (çok fazla istek)', extra);
-    if (status === 404) return scraperError('notfound', 'HTTP 404', extra);
-    return scraperError('server', `HTTP ${status}`, extra);
   }
 
-  /* ------------------------------------------------------------------ indirme */
-
-  function nodeModule(name) {
-    if (typeof require !== 'function') {
-      throw scraperError('nonode', 'Node.js kullanılamıyor (manifest: --enable-nodejs)');
+  // İsteği (gövdesi dahil) zaman aşımıyla çalıştırır, hataları sınıflandırır.
+  async function withTimeout(url, ms, work) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), ms);
+    try {
+      return await work(ctrl.signal);
+    } catch (e) {
+      if (e && e.kind) throw e;
+      if (ctrl.signal.aborted || (e && e.name === 'AbortError')) {
+        throw scraperError('timeout', `${Math.round(ms / 1000)} sn içinde cevap gelmedi`, { url });
+      }
+      throw await classifyFetchFailure(url, e);
+    } finally {
+      clearTimeout(timer);
     }
-    return require(name);
   }
 
-  // Tek bir sayfayı indirir, yönlendirmeleri izler, sıkıştırmayı açar, metni döndürür.
-  function httpGet(url, redirectsLeft = MAX_REDIRECTS) {
-    return new Promise((resolve, reject) => {
-      let client, zlib;
-      try {
-        client = nodeModule(url.startsWith('http:') ? 'http' : 'https');
-        zlib = nodeModule('zlib');
-      } catch (e) {
-        reject(e.kind ? e : scraperError('nonode', e.message));
-        return;
+  // Bir HTML sayfasını indirir. Cloudflare ara sayfasıysa ayrıştırmaya geçmeden 'challenge' hatası verir.
+  function browserGet(url) {
+    return withTimeout(url, timeoutMs, async (signal) => {
+      const res = await doFetch(url, signal);
+      const body = await res.text();
+      const cf = detectCloudflare(res.status, res.headers, body);
+      if (cf) throw challengeError(url, res.status, cf);
+      if (!res.ok) throw httpStatusError(res.status, url);
+      return body;
+    });
+  }
+
+  // Bir ses dosyasını indirir → { buffer: ArrayBuffer, type, size, url }. (Diske yazma Node'un işi.)
+  function fetchAudio(url) {
+    return withTimeout(url, timeoutMs * 2, async (signal) => {
+      const res = await doFetch(url, signal);
+      const type = String(res.headers.get('content-type') || '').toLowerCase();
+      if (!res.ok || type.includes('text/html')) {
+        const body = await res.text().catch(() => '');
+        const cf = detectCloudflare(res.status, res.headers, body);
+        if (cf) throw challengeError(url, res.status, cf);
+        if (!res.ok) throw httpStatusError(res.status, url);
+        throw scraperError('notaudio', 'Gelen dosya ses değil (' + type + ')', { url });
       }
-
-      const headers = {
-        'User-Agent': USER_AGENT,
-        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Accept-Encoding': 'gzip, deflate, br',
-      };
-
-      let req;
-      try {
-        req = client.get(url, { headers }, (res) => {
-          const status = res.statusCode;
-
-          if (status >= 300 && status < 400 && res.headers.location) {
-            res.resume();
-            if (redirectsLeft <= 0) {
-              reject(scraperError('server', 'Çok fazla yönlendirme', { status }));
-              return;
-            }
-            let next;
-            try {
-              next = new URL(res.headers.location, url).href;
-            } catch (e) {
-              reject(scraperError('server', 'Geçersiz yönlendirme', { status }));
-              return;
-            }
-            resolve(httpGet(next, redirectsLeft - 1));
-            return;
-          }
-
-          let stream = res;
-          const enc = String(res.headers['content-encoding'] || '').toLowerCase();
-          if (enc === 'gzip' || enc === 'x-gzip') stream = res.pipe(zlib.createGunzip());
-          else if (enc === 'deflate') stream = res.pipe(zlib.createInflate());
-          else if (enc === 'br') stream = res.pipe(zlib.createBrotliDecompress());
-
-          const chunks = [];
-          stream.on('data', (c) => chunks.push(c));
-          stream.on('error', (e) => reject(scraperError('server', 'Cevap okunamadı: ' + e.message, { status })));
-          stream.on('end', () => {
-            const body = Buffer.concat(chunks).toString('utf8');
-            if (status === 200 && !looksLikeBlockPage(body)) resolve(body);
-            else reject(httpStatusError(status, body, res.headers));
-          });
-        });
-      } catch (e) {
-        reject(classifyNetError(e));
-        return;
-      }
-
-      req.setTimeout(timeoutMs, () => {
-        req.destroy(scraperError('timeout', `${Math.round(timeoutMs / 1000)} sn içinde cevap gelmedi`));
-      });
-      req.on('error', (e) => reject(classifyNetError(e)));
+      const blob = await res.blob();
+      const buffer = await blob.arrayBuffer();
+      if (!buffer.byteLength) throw scraperError('notaudio', 'Boş dosya', { url });
+      return { buffer, type: blob.type || type, size: buffer.byteLength, url: res.url || url };
     });
   }
 
   /* ------------------------------------------------------------------ önbellek */
 
   // Adres → indirme sözü (Promise). Aynı sayfa ikinci kez indirilmez; aynı anda gelen
-  // iki istek de tek indirmeyi paylaşır. Hatalı sonuçlar saklanmaz.
+  // iki istek de tek indirmeyi paylaşır. Hatalı sonuçlar (doğrulama sayfası dahil) saklanmaz.
   const pageCache = new Map();
   let transport = null; // testlerde sahte indirici takmak için
 
@@ -208,7 +221,7 @@
       pageCache.set(url, hit);
       return hit;
     }
-    const get = transport || root.__MI_TEST_TRANSPORT__ || httpGet;
+    const get = transport || browserGet;
     const p = Promise.resolve().then(() => get(url));
     pageCache.set(url, p);
     p.catch(() => {
@@ -399,7 +412,8 @@
       const cats = parseCategories(await fetchPage(BASE + CATEGORIES_PATH));
       if (cats.length) return { categories: cats, fallback: false };
     } catch (e) {
-      if (e.kind === 'nonode') throw e;
+      // Doğrulama / tarayıcı ayarı sorunlarında yedek listeye düşme; panel sorunu göstersin.
+      if (['challenge', 'cors', 'nofetch'].includes(e.kind)) throw e;
     }
     return { categories: FALLBACK_CATEGORIES.slice(), fallback: true };
   }
@@ -415,8 +429,10 @@
     getList,
     getCategories,
     fetchPage,
+    fetchAudio,
     clearCache,
-    httpGet,
+    browserGet,
+    detectCloudflare,
     parseSounds,
     parseCategories,
     parsePlayArgs,

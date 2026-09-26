@@ -163,38 +163,59 @@ test('getCategories: sayfa okunamazsa yedek liste', async (t) => {
   assert.ok(r.categories.some((c) => c.id === 'tiktok trends' && c.label === 'Tiktok Trends'));
 });
 
-/* ---------------- gerçek http istekleriyle hata sınıflandırma (yerel sahte sunucu) ---------------- */
+/* ---------------- Cloudflare ara sayfasını tanıma ---------------- */
 
-test('httpGet: gzip, yönlendirme ve hata türleri', async (t) => {
+test('Cloudflare doğrulama / engel sayfaları tanınır, normal sayfalar karışmaz', () => {
+  const D = S.detectCloudflare;
+  const challenge = '<html><head><title>Just a moment...</title></head><body><script>window._cf_chl_opt={}</script></body></html>';
+  assert.deepEqual(D(403, {}, challenge), { hardBlock: false, title: 'Just a moment...' });
+  assert.equal(D(403, {}, fixture('cloudflare-block.html')).hardBlock, true);
+  assert.ok(D(200, new Headers({ 'cf-mitigated': 'challenge' }), '<html></html>'));
+  // 200 olmayan cevapta cf- izleri
+  assert.ok(D(503, {}, '<html><title>x</title><div id="cf-error-details"></div></html>'));
+  // normal sayfa: Cloudflare'in her sayfaya eklediği betik tek başına doğrulama sayılmaz
+  const normal = fixture('list-page.html').replace('</body>', '<script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js"></script></body>');
+  assert.equal(D(200, {}, normal), null);
+  // "Just a moment" adlı bir sesin arama sayfası doğrulama sanılmaz
+  assert.equal(D(200, {}, '<title>Just a moment Soundboard - Instant Sound Buttons | Myinstants</title>'), null);
+  assert.equal(D(404, {}, '<title>Page not found</title>'), null);
+});
+
+/* ---------------- tarayıcı istekleri (Node'un fetch'i + yerel sahte sunucu) ---------------- */
+
+test('browserGet / fetchAudio: sonuçlar ve hata türleri', async (t) => {
   const listHtml = fixture('list-page.html');
   const server = http.createServer((req, res) => {
     const u = req.url;
     if (u === '/gzip') {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Encoding': 'gzip' });
       res.end(zlib.gzipSync(listHtml));
-    } else if (u === '/br') {
-      res.writeHead(200, { 'Content-Encoding': 'br' });
-      res.end(zlib.brotliCompressSync('merhaba dünya'));
     } else if (u === '/redirect') {
       res.writeHead(301, { Location: '/gzip' });
       res.end();
-    } else if (u === '/loop') {
-      res.writeHead(302, { Location: '/loop' });
-      res.end();
-    } else if (u === '/cf') {
-      res.writeHead(403, { Server: 'cloudflare' });
+    } else if (u === '/challenge') {
+      res.writeHead(403, { 'Content-Type': 'text/html', 'cf-mitigated': 'challenge' });
+      res.end('<html><head><title>Just a moment...</title></head><body></body></html>');
+    } else if (u === '/block') {
+      res.writeHead(403, { Server: 'cloudflare', 'Content-Type': 'text/html' });
       res.end(fixture('cloudflare-block.html'));
-    } else if (u === '/cf200') {
-      res.writeHead(200);
-      res.end('<html><head><title>Just a moment...</title></head></html>');
     } else if (u === '/404') {
       res.writeHead(404);
       res.end('not found');
-    } else if (u === '/500') {
+    } else if (u === '/429') {
+      res.writeHead(429);
+      res.end('slow down');
+    } else if (u === '/502') {
       res.writeHead(502);
       res.end('bad gateway');
     } else if (u === '/slow') {
       setTimeout(() => res.end('geç'), 2000);
+    } else if (u === '/sound.mp3') {
+      res.writeHead(200, { 'Content-Type': 'audio/mpeg' });
+      res.end(Buffer.from([0x49, 0x44, 0x33, 1, 2, 3]));
+    } else if (u === '/html.mp3') {
+      res.writeHead(200, { 'Content-Type': 'text/html' });
+      res.end('<html><title>Myinstants</title></html>');
     } else {
       res.end('?');
     }
@@ -208,17 +229,34 @@ test('httpGet: gzip, yönlendirme ve hata türleri', async (t) => {
     server.close();
   });
 
-  const body = await S.httpGet(base + '/redirect');
-  assert.equal(S.parseSounds(body).length, 4);
-  assert.equal(await S.httpGet(base + '/br'), 'merhaba dünya');
+  assert.equal(S.parseSounds(await S.browserGet(base + '/redirect')).length, 4);
 
-  const kindOf = (p) => S.httpGet(p).then(() => 'ok', (e) => e.kind);
-  assert.equal(await kindOf(base + '/cf'), 'blocked');
-  assert.equal(await kindOf(base + '/cf200'), 'blocked');
+  const kindOf = (p, fn = S.browserGet) => fn(p).then(() => 'ok', (e) => e.kind + (e.hardBlock ? '+hard' : ''));
+  assert.equal(await kindOf(base + '/challenge'), 'challenge');
+  assert.equal(await kindOf(base + '/block'), 'challenge+hard');
   assert.equal(await kindOf(base + '/404'), 'notfound');
-  assert.equal(await kindOf(base + '/500'), 'server');
-  assert.equal(await kindOf(base + '/loop'), 'server');
+  assert.equal(await kindOf(base + '/429'), 'busy');
+  assert.equal(await kindOf(base + '/502'), 'server');
   assert.equal(await kindOf(base + '/slow'), 'timeout');
-  assert.equal(await kindOf('http://127.0.0.1:1/'), 'server'); // bağlantı reddedildi
-  assert.equal(await kindOf('http://olmayan-bir-adres.invalid/'), 'offline'); // DNS çözülemedi
+  assert.equal(await kindOf('http://127.0.0.1:1/'), 'server'); // bağlantı kurulamadı
+
+  const a = await S.fetchAudio(base + '/sound.mp3');
+  assert.ok(a.buffer instanceof ArrayBuffer);
+  assert.deepEqual([a.size, a.type], [6, 'audio/mpeg']);
+  assert.equal(await kindOf(base + '/challenge', S.fetchAudio), 'challenge');
+  assert.equal(await kindOf(base + '/html.mp3', S.fetchAudio), 'notaudio');
+  assert.equal(await kindOf(base + '/404', S.fetchAudio), 'notfound');
+});
+
+test('getCategories: doğrulama gerekiyorsa yedek listeye düşmez', async (t) => {
+  S._setTransport(async () => {
+    const e = new Error('x');
+    e.kind = 'challenge';
+    throw e;
+  });
+  t.after(() => {
+    S._setTransport(null);
+    S.clearCache();
+  });
+  await assert.rejects(S.getCategories(), (e) => e.kind === 'challenge');
 });
