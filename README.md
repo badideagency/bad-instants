@@ -37,6 +37,20 @@ Teşhis: alt çubuktaki yeşil "Premiere … ✓" yazısına ya da panel menüs�
   `$.evalFile` ile yeniden yüklenir ve panel yenilenir.
 - **Panel menüsü (≡):** Paneli yeniden yükle · Güncellemeleri denetle · Önceki sürüme dön · Teşhis.
 
+## Tasarım
+
+- BadIdea Panel'in tasarım dili: krem yazı (`#fff7e9`, saf beyaz yok), 4 basamaklı yüzey merdiveni
+  (derinlik gölgeyle değil aydınlıkla), 5 durum ailesi (nötr / bilgi / süreç / başarı / tehlike),
+  5 / 6 / 8 px köşe yarıçapı, 8 px ızgara, ağırlıklar 400 / 500 / 600. Gölge, bulanıklık ve süs gradyanı yok;
+  krem dolgu yalnızca birincil eylemde.
+- Zemin Premiere'in panel rengidir (`appSkinInfo`); diğer yüzeyler ve renkler `js/theme.js`'te OKLCH ile
+  hesaplanır (Premiere'in Chromium'u `oklch()` bilmediği için sonuç `rgb()` olarak yazılır). Yazı ve durum
+  renkleri, üzerinde durdukları yüzeyde WCAG 4.5:1'i sağlayacak şekilde ölçülerek seçilir.
+- Yazı tipi: **Geist** (değişken, `fonts/Geist-Variable.woff2`, SIL OFL) — pakete gömülü, internet gerekmez.
+- İkonlar: **Lucide** (`js/icons.js`, ISC) — yalnızca kullanılanlar.
+- `.claude/skills/emil-design-eng` (MIT) depoda. Lisansı belli olmayan `critique` ve `ui-ux-pro-max` skill'leri
+  yalnızca yerelde kullanılır, depoya girmez (`.gitignore`).
+
 ## Siteye nasıl bağlanır
 
 - Bütün istekler **panelin kendi Chromium'uyla** yapılır (`fetch`, çerezler dahil). Node siteye istek atmaz;
@@ -55,6 +69,9 @@ Teşhis: alt çubuktaki yeşil "Premiere … ✓" yazısına ya da panel menüs�
 extension/            ← Premiere'e bağlanan panel klasörü
   CSXS/manifest.xml   ← panel tanımı (PPRO [26.0,99.9], CEP 12, Node.js açık)
   index.html, css/    ← görünüm
+  js/theme.js         ← BadIdea renklerini Premiere'in panel rengine uyarlama (OKLCH, kontrast)
+  js/icons.js         ← Lucide ikonları (ISC)
+  fonts/              ← Geist değişken yazı tipi (SIL OFL)
   js/siteScraper.js   ← myinstants.com'u okuyan TEK dosya (site değişirse yalnız burası düzeltilir)
   js/localFiles.js    ← diske yazma, dosya adı kuralları (Node)
   js/main.js          ← arayüz davranışı, İndir iş sırası, güncelleme / panel menüsü
@@ -69,7 +86,7 @@ tools/site-probe.bat  ← YALNIZ TEŞHİS: sitenin yapısını PowerShell ile ra
 tools/release.js      ← tek komutla sürüm yayınlama (npm run release -- X.Y.Z)
 tools/build-release.js← sürüm paketi (ZIP + release.json)
 release-notes/        ← her sürümün kısa Türkçe değişiklik notu (vX.Y.Z.md)
-.github/workflows/    ← etiket gelince Release'i yayınlayan GitHub Actions
+.github/workflows/    ← main'e yeni sürüm gelince etiketi ve Release'i oluşturan GitHub Actions
 tests/                ← geliştirme testleri (panelin çalışması için gerekmez)
 ```
 
@@ -124,4 +141,5 @@ npm run test:ui   # paneli manifest'teki CEF ayarlarıyla headless Chromium'da a
                   # Doğrula penceresini, çerez paylaşımını ve yeniden açılışta çerezin kalmasını dener
 npm run test:stage2 # İndir → diske yaz → import → timeline akışı (sahte site + sahte Premiere + sahte disk)
 npm run test:update # panel içi güncelleme: sahte GitHub, gerçek geçici kurulum klasörü, menü, geri dönüş
+npm run test:design # tasarım denetimi: bütün durumların ekran görüntüsü, Geist + Türkçe harfler, kontrast, dar panel
 ```

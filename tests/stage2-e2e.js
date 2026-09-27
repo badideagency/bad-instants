@@ -116,11 +116,16 @@ async function main() {
   await page.goto(PANEL);
   const rows = page.locator('#rows .row');
   await rows.first().waitFor();
-  await page.waitForFunction(() => /Premiere 26\.5\.1 ✓/.test(document.querySelector('#hostText').textContent));
+  await page.waitForFunction(() => /Premiere 26\.5\.1$/.test(document.querySelector('#hostText').textContent));
   const dl = (i) => rows.nth(i).locator('button.dl');
+  // Tuşun durumu: meşgul → "…", bitti → "✓ A1", boşta → "İndir" (ikonlar sınıfla gösteriliyor)
   const waitDl = (i, re) =>
     page.waitForFunction(
-      ([i, src]) => new RegExp(src).test(document.querySelectorAll('#rows .row button.dl')[i].textContent),
+      ([i, src]) => {
+        const b = document.querySelectorAll('#rows .row button.dl')[i];
+        const label = b.classList.contains('busy') ? '…' : (b.classList.contains('done') ? '✓ ' : '') + b.textContent.trim();
+        return new RegExp(src).test(label);
+      },
       [i, re.source]
     );
   const mp3Requests = () => site.state.requests.filter((q) => q.path.startsWith('/media/sounds/') && q.secFetchDest !== 'audio').length;

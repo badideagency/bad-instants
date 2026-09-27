@@ -9,7 +9,8 @@
     "test:stage2": "node tests/stage2-e2e.js",
     "release": "node tools/release.js",
     "build:release": "node tools/build-release.js",
-    "test:update": "node tests/update-e2e.js"
+    "test:update": "node tests/update-e2e.js",
+    "test:design": "node tests/design-shots.js"
   },
   "devDependencies": {
     "acorn": "^8.18.0",

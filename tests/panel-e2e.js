@@ -129,7 +129,7 @@ async function main() {
   const retried = site.last(/^\/en\/trending\/us\/$/);
   assert.equal(retried.hasClearance, true); // pencerede alınan çerez panelin isteğine eklendi
   assert.equal(retried.secFetchMode, 'cors');
-  assert.match(await page.locator('#statusText').textContent(), /Doğrulama tamam ✓/);
+  assert.match(await page.locator('#statusText').textContent(), /Doğrulama tamam/);
   assert.ok(Number(await page.evaluate(() => localStorage.getItem('mi.verifiedAt'))) > 0);
   step('Doğrula: window.open penceresi açıldı; kapanınca istek otomatik tekrarlandı, çerez panelle ortak');
 

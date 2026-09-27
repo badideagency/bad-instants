@@ -220,7 +220,7 @@ async function main() {
   /* 2) Güncelle → indir, doğrula, yedekle, kur → manifest aynı → host.jsx + panel yenilenir */
   await chip.click();
   await page.waitForFunction(() => /MyInstants v0\.3\.1 hazır \(şu an v0\.3\.0\)/.test(document.querySelector('#notice').textContent));
-  assert.match(await notice.locator('pre').textContent(), /• Panel içi güncelleme eklendi\n• Küçük düzeltmeler \(ç ğ ı ö ş ü\)/);
+  assert.match(await notice.locator('.notes').innerText(), /• Panel içi güncelleme eklendi\n• Küçük düzeltmeler \(ç ğ ı ö ş ü\)/);
   await page.screenshot({ path: path.join(OUT, 'u-2-offer.png') });
   const reload1 = page.waitForEvent('load', { timeout: 30000 });
   await notice.locator('button', { hasText: 'Güncelle' }).click();

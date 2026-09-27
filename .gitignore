@@ -2,3 +2,6 @@ node_modules/
 tools/site-probe-sonuc.txt
 test-output/
 dist/
+# Lisansı belli olmayan tasarım skill'leri yalnızca yerelde kullanılır (public depoya girmez)
+.claude/skills/critique/
+.claude/skills/ui-ux-pro-max/

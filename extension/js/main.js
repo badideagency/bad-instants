@@ -102,31 +102,18 @@
     cs = null;
   }
 
+  // Premiere'in panel rengine uyan BadIdea teması (js/theme.js). Premiere dışında varsayılan koyu renk.
   function applyTheme() {
-    if (!cs) return;
-    try {
-      const c = cs.getHostEnvironment().appSkinInfo.panelBackgroundColor.color;
-      setThemeFromRgb(Math.round(c.red), Math.round(c.green), Math.round(c.blue));
-    } catch (e) {
-      /* varsayılan koyu tema kalır */
+    let bg = null;
+    if (cs) {
+      try {
+        const c = cs.getHostEnvironment().appSkinInfo.panelBackgroundColor.color;
+        bg = [c.red, c.green, c.blue];
+      } catch (e) {
+        bg = null;
+      }
     }
-  }
-
-  function setThemeFromRgb(r, g, b) {
-    const dark = (0.299 * r + 0.587 * g + 0.114 * b) / 255 < 0.5;
-    const clamp = (v) => Math.max(0, Math.min(255, v));
-    const shade = (d) => `rgb(${clamp(r + d)}, ${clamp(g + d)}, ${clamp(b + d)})`;
-    const s = document.documentElement.style;
-    s.setProperty('--bg', `rgb(${r}, ${g}, ${b})`);
-    s.setProperty('--bg-raised', shade(dark ? 12 : -12));
-    s.setProperty('--bg-hover', shade(dark ? 22 : -20));
-    s.setProperty('--bg-sunken', shade(dark ? -8 : 10));
-    s.setProperty('--border', shade(dark ? 30 : -34));
-    s.setProperty('--line', dark ? 'rgba(255,255,255,0.045)' : 'rgba(0,0,0,0.06)');
-    s.setProperty('--text', dark ? '#d6d6d6' : '#1f1f1f');
-    s.setProperty('--text-strong', dark ? '#ffffff' : '#000000');
-    s.setProperty('--text-dim', dark ? '#8c8c8c' : '#5c5c5c');
-    document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
+    Theme.apply(bg);
   }
 
   let hostVersion = ''; // Premiere sürümü (zaman birimi bu sürüme göre saklanır)
@@ -134,7 +121,7 @@
   function pingHost() {
     const setHost = (text, cls) => {
       el.hostText.textContent = text;
-      el.hostText.className = cls || '';
+      el.hostText.className = 'host' + (cls ? ' ' + cls : '');
     };
     if (!cs) {
       setHost('Premiere dışında');
@@ -144,7 +131,7 @@
       const r = String(res || '');
       if (r.indexOf('ok|') === 0) {
         hostVersion = r.slice(3);
-        setHost('Premiere ' + hostVersion + ' ✓', 'ok');
+        setHost('Premiere ' + hostVersion, 'ok');
       }
       else setHost('Premiere bağlantısı yok', 'bad');
     });
@@ -227,7 +214,7 @@
     if (verify.justVerified) {
       verify.justVerified = false;
       store.set('verifiedAt', Date.now());
-      flash('Doğrulama tamam ✓');
+      flash('Doğrulama tamam');
       return;
     }
     const at = Number(store.get('verifiedAt', '0'));
@@ -267,21 +254,49 @@
 
   function line(text, cls) {
     const d = document.createElement('div');
-    if (cls) d.className = cls;
+    d.className = cls || 'body';
     d.textContent = text;
     return d;
+  }
+
+  // İkon + başlık satırı
+  function head(iconName, title) {
+    const h = document.createElement('div');
+    h.className = 'head';
+    const ic = Icons.svg(iconName, 16);
+    if (ic) h.append(ic);
+    if (title) h.append(line(title, 'title'));
+    return h;
+  }
+
+  // Tuş satırı: birincil eylem her zaman en sağda (krem dolgu)
+  function actionsRow(buttons) {
+    const bar = document.createElement('div');
+    bar.className = 'actions';
+    buttons
+      .filter(Boolean)
+      .sort((a, b) => a.classList.contains('primary') - b.classList.contains('primary'))
+      .forEach((b) => bar.append(b));
+    return bar;
+  }
+
+  function srOnly(text) {
+    const s = document.createElement('span');
+    s.className = 'sr-only';
+    s.textContent = text;
+    return s;
   }
 
   // "Site doğrulama istiyor" kutusu. after: pencere kapanınca ne olacağı (liste yenilenir / ses denenir)
   function challengeBox(err, title, retry, after = 'liste kendiliğinden yenilenir') {
     const box = document.createElement('div');
     box.className = 'msg error challenge';
-    box.append(line('⚠', 'icon'), line(title || 'Site doğrulama istiyor.', 'title'));
+    box.append(head('shield-check', title || 'Site doğrulama istiyor.'));
 
     if (verify.win && !isClosed(verify.win)) {
       box.append(
         line(`Doğrulama penceresi açık. Oradaki adımı tamamlayıp pencereyi kapatın; ${after}.`),
-        button('Doğrulamayı bitirdim', 'retry', finishVerify)
+        actionsRow([button('Doğrulamayı bitirdim', 'retry', finishVerify)])
       );
       return box;
     }
@@ -313,8 +328,8 @@
         console.warn('[MyInstants] Önceki doğrulama bu oturumda geçerli değil. verifiedAt=' + new Date(at).toISOString());
       }
     }
-    box.append(button('Doğrula', 'retry primary', () => openVerifyWindow(err.url, retry)));
     if (err.status) box.append(line('HTTP ' + err.status + (err.hardBlock ? ' · engel sayfası' : ' · doğrulama sayfası'), 'detail'));
+    box.append(actionsRow([button('Doğrula', 'retry primary', () => openVerifyWindow(err.url, retry))]));
     return box;
   }
 
@@ -323,13 +338,19 @@
     if ((kind === 'server' || kind === 'timeout') && navigator.onLine === false) kind = 'offline';
     const box = document.createElement('div');
     box.className = 'msg error';
-    box.append(line('⚠', 'icon'));
-    if (title) box.append(line(title, 'title'));
-    box.append(line(err.userMessage || ERROR_TEXT[kind] || ERROR_TEXT.server));
+    const text = err.userMessage || ERROR_TEXT[kind] || ERROR_TEXT.server;
+    const h = head('triangle-alert', title);
+    if (!title) h.append(line(text));
+    box.append(h);
+    if (title) box.append(line(text));
     const detail = err.detail || [err.status ? 'HTTP ' + err.status : '', err.kind ? '' : err.message].filter(Boolean).join(' · ');
     if (detail) box.append(line(detail, 'detail'));
-    if (retry && !err.noRetry) box.append(button('Tekrar dene', 'retry', retry));
-    if (onClose) box.append(button('Kapat', 'retry', onClose));
+    box.append(
+      actionsRow([
+        onClose ? button('Kapat', 'retry', onClose) : null,
+        retry && !err.noRetry ? button('Tekrar dene', 'retry primary', retry) : null,
+      ])
+    );
     return box;
   }
 
@@ -344,7 +365,7 @@
     if (!state.notice) return;
     const n = state.notice;
     if (n.lines) {
-      el.notice.append(infoBox(n.title, n.lines, n.actions));
+      el.notice.append(infoBox(n.title, n.lines, n.actions, n.icon, n.prose));
       return;
     }
     el.notice.append(
@@ -433,6 +454,11 @@
         timer = null;
         if (row === r) stop();
       },
+      playNow(r, it) {
+        clearTimeout(timer);
+        timer = null;
+        play(r, it);
+      },
       stop,
       setVolume(v) {
         audio.volume = Math.max(0, Math.min(1, v));
@@ -480,7 +506,7 @@
 
   /* ------------------------------------------------------------------ İndir → import → timeline */
 
-  const DL_IDLE = '⬇ İndir';
+  const DL_IDLE = 'İndir';
   const JOB_TEXT = {
     nohost: 'Premiere bağlantısı yok (panel Premiere dışında açık).',
     hostscript: 'Premiere komutu çalışmadı (host.jsx yüklenmemiş olabilir). Paneli kapatıp açın.',
@@ -553,11 +579,19 @@
     }
   }
 
+  // İndir tuşunun üç hâli: [indir ikonu] İndir · [dönen gösterge] · [onay ikonu] A3
   function setDl(btn, mode, text) {
     clearTimeout(btn._miTimer);
     btn.classList.toggle('busy', mode === 'busy');
     btn.classList.toggle('done', mode === 'done');
-    btn.textContent = mode === 'busy' ? '…' : mode === 'done' ? text : DL_IDLE;
+    btn.replaceChildren();
+    if (mode === 'busy') {
+      btn.append(Icons.svg('loader-circle', 14), srOnly('İndiriliyor'));
+      btn.setAttribute('aria-busy', 'true');
+    } else {
+      btn.removeAttribute('aria-busy');
+      btn.append(Icons.svg(mode === 'done' ? 'check' : 'download', 14), document.createTextNode(mode === 'done' ? text : DL_IDLE));
+    }
     if (mode === 'done') btn._miTimer = setTimeout(() => setDl(btn, 'idle'), 1800);
   }
 
@@ -573,7 +607,7 @@
   async function runJob(item, btn) {
     try {
       const r = await downloadAndPlace(item);
-      setDl(btn, 'done', '✓ A' + r.track);
+      setDl(btn, 'done', 'A' + r.track);
       if (state.notice && state.notice.jobItem === item) closeNotice();
       flash(`“${item.name}” → A${r.track}` + (r.addedTrack ? ' (yeni track)' : ''));
     } catch (err) {
@@ -636,22 +670,23 @@
   /* ------------------------------------------------------------------ teşhis */
 
   // Bilgi kutusu. actions verilmezse yalnızca "Kapat"; [] ise hiç tuş yok (ör. işlem sürüyor).
-  function infoBox(title, lines, actions) {
+  // prose: true → satırlar düz metin (ör. değişiklik notu); değilse eş aralıklı teşhis kutusu
+  function infoBox(title, lines, actions, iconName, prose) {
     const box = document.createElement('div');
     box.className = 'msg info';
-    box.append(line(title, 'title'));
-    if (lines && lines.length) {
+    box.append(head(iconName || 'info', title));
+    if (lines && lines.length && prose) {
+      const notes = document.createElement('div');
+      notes.className = 'notes';
+      notes.append(...lines.map((l) => line(l)));
+      box.append(notes);
+    } else if (lines && lines.length) {
       const pre = document.createElement('pre');
       pre.textContent = lines.join('\n');
       box.append(pre);
     }
     const acts = actions || [{ text: 'Kapat', onClick: closeNotice }];
-    if (acts.length) {
-      const bar = document.createElement('div');
-      bar.className = 'actions';
-      for (const a of acts) bar.append(button(a.text, 'retry' + (a.primary ? ' primary' : ''), a.onClick));
-      box.append(bar);
-    }
+    if (acts.length) box.append(actionsRow(acts.map((a) => button(a.text, 'retry' + (a.primary ? ' primary' : ''), a.onClick))));
     return box;
   }
 
@@ -733,7 +768,7 @@
     const l = update.latest;
     chip.hidden = !l;
     if (!l) return;
-    chip.textContent = `v${l.version} hazır — Güncelle`;
+    chip.replaceChildren(Icons.svg('circle-arrow-up', 12), document.createTextNode(`v${l.version} hazır — Güncelle`));
     chip.title = (l.notes || '').slice(0, 400);
   }
 
@@ -771,6 +806,7 @@
       .replace(/\r/g, '')
       .split('\n')
       .map((l) => l.replace(/^#+\s*/, '').replace(/^\s*[-*]\s+/, '• ').replace(/\*\*|__|`/g, ''))
+      .filter((l) => !/^MyInstants v\d+\.\d+\.\d+\s*$/.test(l)) // başlığı tekrar eden satır
       .filter((l, i, a) => l.trim() || (i > 0 && a[i - 1].trim()));
   }
 
@@ -778,7 +814,9 @@
     const l = update.latest;
     if (!l) return;
     state.notice = {
-      title: `MyInstants v${l.version} hazır (şu an v${panelVersion})`,
+      title: `MyInstants v${l.version} hazır` + (panelVersion ? ` (şu an v${panelVersion})` : ''),
+      icon: 'circle-arrow-up',
+      prose: true,
       lines: plainNotes(l.notes).slice(0, 30),
       actions: [
         { text: 'Güncelle', primary: true, onClick: runUpdate },
@@ -797,7 +835,7 @@
   }
 
   function progress(title, text) {
-    state.notice = { title, lines: [text], actions: [] };
+    state.notice = { title, lines: [text], actions: [], prose: true };
     renderNotice();
   }
 
@@ -907,10 +945,10 @@
       const b = await U.previousBackup(panelVersion).catch(() => null);
       lines.push('Önceki sürüm yedeği: ' + (b ? 'v' + b.version : 'yok'));
     }
-    const when = update.lastCheck ? new Date(update.lastCheck).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }) : '';
-    if (update.lastError) lines.push(`Güncelleme denetimi (${when}): yapılamadı — ${UPDATE_TEXT[update.lastError.kind] || update.lastError.message}`);
-    else if (update.latest) lines.push(`Güncelleme (${when}): v${update.latest.version} hazır`);
-    else if (update.lastCheck) lines.push(`Güncelleme (${when}): güncel`);
+    const when = update.lastCheck ? ` (${new Date(update.lastCheck).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })})` : '';
+    if (update.lastError) lines.push(`Güncelleme denetimi${when}: yapılamadı — ${UPDATE_TEXT[update.lastError.kind] || update.lastError.message}`);
+    else if (update.latest) lines.push(`Güncelleme${when}: v${update.latest.version} hazır`);
+    else if (update.lastCheck) lines.push(`Güncelleme${when}: güncel`);
     else lines.push('Güncelleme: henüz denetlenmedi');
     return lines;
   }
@@ -958,6 +996,13 @@
   function makeRow(item) {
     const row = document.createElement('div');
     row.className = 'row';
+    row.tabIndex = 0;
+    row.setAttribute('role', 'listitem');
+
+    // Baştaki durum yuvası: çalıyor ▶ / yükleniyor / çalınamadı (yer hep ayrılı; kayma olmaz)
+    const lead = document.createElement('span');
+    lead.className = 'lead';
+    lead.append(Icons.svg('play', 12), Icons.svg('loader-circle', 12), Icons.svg('circle-alert', 12));
 
     const name = document.createElement('span');
     name.className = 'name';
@@ -967,16 +1012,25 @@
     const dl = document.createElement('button');
     dl.type = 'button';
     dl.className = 'dl';
-    dl.textContent = DL_IDLE;
+    setDl(dl, 'idle');
     dl.title = 'İndir ve aktif sequence’te playhead’e koy';
     dl.addEventListener('click', (e) => {
       e.stopPropagation();
       queueDownload(item, dl);
     });
 
-    row.append(name, dl);
+    row.append(lead, name, dl);
     row.addEventListener('mouseenter', () => preview.hoverStart(row, item));
     row.addEventListener('mouseleave', () => preview.hoverEnd(row));
+    // Önizleme yalnızca hover'a bağlı kalmasın: tıklama ve Enter/Boşluk baştan çalar, Esc durdurur.
+    row.addEventListener('click', () => preview.playNow(row, item));
+    row.addEventListener('keydown', (e) => {
+      if (e.target !== row) return;
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        preview.playNow(row, item);
+      } else if (e.key === 'Escape') preview.stop();
+    });
     return row;
   }
 
@@ -987,7 +1041,7 @@
     if (state.loading) {
       const s = document.createElement('span');
       s.className = 'loading';
-      s.textContent = 'Yükleniyor…';
+      s.append(Icons.svg('loader-circle', 14), document.createTextNode('Yükleniyor…'));
       end.append(s);
       return;
     }
@@ -1107,6 +1161,8 @@
   function updateChrome() {
     el.tabs.querySelectorAll('button').forEach((b) => {
       b.classList.toggle('active', b.dataset.tab === state.tab);
+      b.setAttribute('aria-selected', b.dataset.tab === state.tab ? 'true' : 'false');
+      if (b.dataset.tab === state.tab && b.scrollIntoView) b.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     });
 
     const regional = S.isRegional(state.tab);
@@ -1204,6 +1260,7 @@
     const n = Math.max(0, Math.min(100, Number.isFinite(v) ? v : 60));
     el.volume.value = String(n);
     el.volumeLabel.textContent = '%' + n;
+    el.volume.style.setProperty('--fill', n + '%');
     preview.setVolume(n / 100);
     return n;
   }
@@ -1217,6 +1274,7 @@
 
   /* ------------------------------------------------------------------ başlangıç */
 
+  Icons.hydrate();
   applyTheme();
   if (cs) cs.addEventListener(CSInterface.THEME_COLOR_CHANGED_EVENT, applyTheme);
   setVolume(savedVolume);
@@ -1230,5 +1288,5 @@
   });
 
   // Hata ayıklama ve testler için
-  window.MyInstantsPanel = { state, preview, loadList, verify, runDiagnostics, checkForUpdates, update };
+  window.MyInstantsPanel = { state, preview, loadList, verify, runDiagnostics, checkForUpdates, update, setDl, showUpdateOffer, renderUpdateChip };
 })();
