@@ -21,7 +21,21 @@ fareyle üstüne gelince önizleme çalar; **⬇ İndir** sesi indirip aktif seq
 Geri alma (Ctrl+Z): Premiere'in ExtendScript'inde işlemleri tek adımda toplama imkânı yok.
 Bin var + dosya daha önce import edilmiş → 1 adım; dosya yeni → 2; projede ilk kullanım → 3; yeni track eklendiyse +1.
 
-Teşhis: alt çubuktaki yeşil "Premiere … ✓" yazısına tıklayın (kilit bilgisi, track ekleme, zaman birimi).
+Teşhis: alt çubuktaki yeşil "Premiere … ✓" yazısına ya da panel menüsünde (≡) **Teşhis**'e tıklayın.
+
+## Güncelleme (panelin içinden)
+
+- Panel açılışta ve 6 saatte bir GitHub'daki son sürüme bakar (token yok; depo public). Yeni sürüm varsa
+  alt çubukta **"vX.Y.Z hazır — Güncelle"** çıkar; tıklayınca değişiklik notu gösterilir.
+- **Güncelle:** ZIP indirilir, boyutu ve SHA-256 özeti `release.json` ile karşılaştırılır, paketle gelen saf JS
+  (fflate) ile açılır, güvensiz yollar ve başka eklentilere ait paketler reddedilir. Mevcut sürüm
+  `%APPDATA%\BadIdea\MyInstants\backup\<sürüm>` altına yedeklenir (CEP klasörünün dışında), dosyalar değiştirilir.
+  Herhangi bir adımda hata olursa yedek otomatik geri yüklenir.
+- Kurulum bağlantı (junction) ise gerçek klasör güncellenir; kopya ise kopya. Gerçek klasör bir git çalışma
+  kopyasındaysa otomatik güncelleme yapılmaz (git pull kullanın).
+- Sonrası: `manifest.xml`'in ayarları değiştiyse "Premiere'i yeniden başlatın" denir; değişmediyse `host.jsx`
+  `$.evalFile` ile yeniden yüklenir ve panel yenilenir.
+- **Panel menüsü (≡):** Paneli yeniden yükle · Güncellemeleri denetle · Önceki sürüme dön · Teşhis.
 
 ## Siteye nasıl bağlanır
 
@@ -43,13 +57,19 @@ extension/            ← Premiere'e bağlanan panel klasörü
   index.html, css/    ← görünüm
   js/siteScraper.js   ← myinstants.com'u okuyan TEK dosya (site değişirse yalnız burası düzeltilir)
   js/localFiles.js    ← diske yazma, dosya adı kuralları (Node)
-  js/main.js          ← arayüz davranışı, İndir iş sırası
+  js/main.js          ← arayüz davranışı, İndir iş sırası, güncelleme / panel menüsü
+  js/updater.js       ← panel içi güncelleme (denetim, doğrulama, yedek, kurulum, geri dönüş)
+  js/vendor/fflate.js ← saf JS ZIP kütüphanesi (MIT)
   js/CSInterface.js   ← Adobe'nin resmi CEP 12 dosyası
   jsx/host.jsx        ← Premiere tarafı (ExtendScript, ES3): import, boş track bulma, overwrite, teşhis
   .debug              ← hata ayıklama portu (8871)
 install.bat           ← paneli kurar (bağlantı/junction ile)
 uninstall.bat         ← paneli kaldırır
 tools/site-probe.bat  ← YALNIZ TEŞHİS: sitenin yapısını PowerShell ile raporlar (panelin davranışını göstermez)
+tools/release.js      ← tek komutla sürüm yayınlama (npm run release -- X.Y.Z)
+tools/build-release.js← sürüm paketi (ZIP + release.json)
+release-notes/        ← her sürümün kısa Türkçe değişiklik notu (vX.Y.Z.md)
+.github/workflows/    ← etiket gelince Release'i yayınlayan GitHub Actions
 tests/                ← geliştirme testleri (panelin çalışması için gerekmez)
 ```
 
@@ -86,6 +106,14 @@ panel "sitenin yapısı değişmiş olabilir" dediğinde HTML'e bakmak için kul
 
 Panel Premiere'de açıkken Chrome'da `http://localhost:8871` → panelin Console'u.
 
+## Sürüm yayınlama (geliştirici)
+
+1. `release-notes/vX.Y.Z.md` dosyasına kısa Türkçe değişiklik notunu yazın ve commit'leyin.
+2. `npm run release -- X.Y.Z` (denemek için sonuna `--dry-run`).
+   Testler çalışır → sürüm manifest/package.json'da yükseltilir → paket denenir → commit → `main`'e gönderilir →
+   `vX.Y.Z` etiketi atılır. GitHub Actions etiketi görünce ZIP + `release.json`'ı hazırlayıp Release'i yayınlar
+   (kişisel token gerekmez).
+
 ## Geliştirici testleri (isteğe bağlı, Node.js gerekir)
 
 ```
@@ -95,4 +123,5 @@ npm run test:ui   # paneli manifest'teki CEF ayarlarıyla headless Chromium'da a
                   # Cloudflare benzeri sahte bir siteye (tests/fake-site.js) yönlendirip gerçek fetch yolunu,
                   # Doğrula penceresini, çerez paylaşımını ve yeniden açılışta çerezin kalmasını dener
 npm run test:stage2 # İndir → diske yaz → import → timeline akışı (sahte site + sahte Premiere + sahte disk)
+npm run test:update # panel içi güncelleme: sahte GitHub, gerçek geçici kurulum klasörü, menü, geri dönüş
 ```

@@ -6,7 +6,10 @@
   "scripts": {
     "test": "node --test tests/*.test.js",
     "test:ui": "node tests/panel-e2e.js",
-    "test:stage2": "node tests/stage2-e2e.js"
+    "test:stage2": "node tests/stage2-e2e.js",
+    "release": "node tools/release.js",
+    "build:release": "node tools/build-release.js",
+    "test:update": "node tests/update-e2e.js"
   },
   "devDependencies": {
     "acorn": "^8.18.0",

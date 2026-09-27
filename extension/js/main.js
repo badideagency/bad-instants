@@ -48,6 +48,7 @@
     rows: $('rows'),
     listEnd: $('listEnd'),
     statusText: $('statusText'),
+    updateChip: $('updateChip'),
     hostText: $('hostText'),
   };
 
@@ -343,7 +344,7 @@
     if (!state.notice) return;
     const n = state.notice;
     if (n.lines) {
-      el.notice.append(infoBox(n.title, n.lines));
+      el.notice.append(infoBox(n.title, n.lines, n.actions));
       return;
     }
     el.notice.append(
@@ -634,13 +635,23 @@
 
   /* ------------------------------------------------------------------ teşhis */
 
-  function infoBox(title, lines) {
+  // Bilgi kutusu. actions verilmezse yalnızca "Kapat"; [] ise hiç tuş yok (ör. işlem sürüyor).
+  function infoBox(title, lines, actions) {
     const box = document.createElement('div');
     box.className = 'msg info';
     box.append(line(title, 'title'));
-    const pre = document.createElement('pre');
-    pre.textContent = lines.join('\n');
-    box.append(pre, button('Kapat', 'retry', closeNotice));
+    if (lines && lines.length) {
+      const pre = document.createElement('pre');
+      pre.textContent = lines.join('\n');
+      box.append(pre);
+    }
+    const acts = actions || [{ text: 'Kapat', onClick: closeNotice }];
+    if (acts.length) {
+      const bar = document.createElement('div');
+      bar.className = 'actions';
+      for (const a of acts) bar.append(button(a.text, 'retry' + (a.primary ? ' primary' : ''), a.onClick));
+      box.append(bar);
+    }
     return box;
   }
 
@@ -665,7 +676,7 @@
     }
     const unit = store.get('timeUnit.' + (hostVersion || 'bilinmiyor'), '');
     lines.push('Zaman birimi (bu sürüm): ' + (unit === 'ticks' ? 'tick (metin)' : unit === 'seconds' ? 'saniye' : 'henüz denenmedi'));
-    lines.push('Panel: 0.2.0');
+    lines.push(...(await updateDiagLines()));
     state.notice = { title: 'Teşhis', lines };
     renderNotice();
     console.log('[MyInstants] Teşhis:\n' + lines.join('\n'));
@@ -673,6 +684,274 @@
 
   el.hostText.title = 'Tıklayın: teşhis';
   el.hostText.addEventListener('click', runDiagnostics);
+
+  /* ------------------------------------------------------------------ sürüm, güncelleme, panel menüsü */
+
+  const U = window.Updater;
+  const UPDATE_FIRST_DELAY_MS = 3000;
+  const UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 saat
+  const UPDATE_TEXT = {
+    nonode: 'Panel diske erişemiyor (Node.js kapalı).',
+    network: 'GitHub’a ulaşılamadı. İnternet bağlantısını kontrol edin.',
+    notfound: 'Yayınlanmış bir sürüm bulunamadı (depo erişilemiyor olabilir).',
+    badhost: 'Güncelleme GitHub dışı bir adrese yönlendirildi; kurulmadı.',
+    badrelease: 'Sürüm bilgisi eksik ya da tutarsız (ZIP / release.json); kurulmadı.',
+    toolarge: 'Güncelleme paketi beklenenden büyük; kurulmadı.',
+    size: 'İndirilen paketin boyutu tutmuyor; kurulmadı.',
+    checksum: 'İndirilen paketin özeti (SHA-256) tutmuyor; kurulmadı.',
+    badzip: 'Güncelleme paketi açılamadı ya da güvensiz dosya yolu içeriyor; kurulmadı.',
+    badpackage: 'Güncelleme paketi bu panele ait değil ya da sürümü tutmuyor; kurulmadı.',
+    gitcheckout: 'Bu kurulum bir geliştirici (git) klasörüne bağlı. Güncellemeyi git pull ile yapın.',
+    backupfailed: 'Mevcut sürüm yedeklenemedi; güncelleme yapılmadı, panel değişmedi.',
+    rolledback: 'Güncelleme kurulurken hata oldu; önceki sürüm geri yüklendi. Panel değişmedi.',
+    rollbackfailed: 'DİKKAT: Güncelleme yarıda kaldı ve yedek geri yüklenemedi. Bu durumu bildirin.',
+    nobackup: 'Geri dönülecek önceki sürüm yedeği yok.',
+    noext: 'Panelin kurulu olduğu klasör bulunamadı.',
+  };
+
+  const update = { latest: null, lastCheck: 0, lastError: null, busy: false };
+  let extPath = ''; // panelin yüklendiği klasör (CEP'in verdiği yol; junction olabilir)
+  let panelVersion = '';
+
+  try {
+    if (cs) extPath = cs.getSystemPath(SystemPath.EXTENSION);
+  } catch (e) {
+    extPath = '';
+  }
+
+  async function initVersion() {
+    if (!extPath || !U) return;
+    try {
+      panelVersion = await U.installedVersion(extPath);
+    } catch (e) {
+      console.warn('[MyInstants] Panel sürümü okunamadı:', e);
+    }
+  }
+
+  function renderUpdateChip() {
+    const chip = el.updateChip;
+    const l = update.latest;
+    chip.hidden = !l;
+    if (!l) return;
+    chip.textContent = `v${l.version} hazır — Güncelle`;
+    chip.title = (l.notes || '').slice(0, 400);
+  }
+
+  async function checkForUpdates(manual) {
+    if (!U) return;
+    if (!panelVersion) await initVersion();
+    if (!panelVersion) {
+      if (manual) showUpdateError(U.error('noext'));
+      return;
+    }
+    try {
+      const l = await U.checkLatest(panelVersion);
+      update.latest = l.newer ? l : null;
+      update.lastError = null;
+      update.lastCheck = Date.now();
+      renderUpdateChip();
+      if (manual) {
+        if (l.newer) showUpdateOffer();
+        else {
+          state.notice = { title: 'Güncelleme', lines: [`Panel güncel: v${panelVersion}`] };
+          renderNotice();
+        }
+      }
+    } catch (e) {
+      update.lastError = e;
+      update.lastCheck = Date.now();
+      console.warn('[MyInstants] Güncelleme denetlenemedi:', e);
+      if (manual) showUpdateError(e);
+    }
+  }
+
+  // Release notundaki Markdown işaretlerini sade metne çevirir
+  function plainNotes(md) {
+    return String(md || '')
+      .replace(/\r/g, '')
+      .split('\n')
+      .map((l) => l.replace(/^#+\s*/, '').replace(/^\s*[-*]\s+/, '• ').replace(/\*\*|__|`/g, ''))
+      .filter((l, i, a) => l.trim() || (i > 0 && a[i - 1].trim()));
+  }
+
+  function showUpdateOffer() {
+    const l = update.latest;
+    if (!l) return;
+    state.notice = {
+      title: `MyInstants v${l.version} hazır (şu an v${panelVersion})`,
+      lines: plainNotes(l.notes).slice(0, 30),
+      actions: [
+        { text: 'Güncelle', primary: true, onClick: runUpdate },
+        { text: 'Sonra', onClick: closeNotice },
+      ],
+    };
+    renderNotice();
+  }
+
+  function showUpdateError(e, title) {
+    const lines = [UPDATE_TEXT[e.kind] || 'Beklenmeyen hata.'];
+    if (e.message && e.message !== e.kind) lines.push('Ayrıntı: ' + e.message);
+    if (e.backupDir) lines.push('Yedek: ' + e.backupDir);
+    state.notice = { title: title || 'Güncelleme yapılamadı', lines };
+    renderNotice();
+  }
+
+  function progress(title, text) {
+    state.notice = { title, lines: [text], actions: [] };
+    renderNotice();
+  }
+
+  async function runUpdate() {
+    const l = update.latest;
+    if (!l || update.busy) return;
+    update.busy = true;
+    const title = `v${l.version} kuruluyor…`;
+    try {
+      progress(title, 'Kurulum klasörü kontrol ediliyor…');
+      const inst = await U.resolveInstall(extPath);
+      if (inst.gitCheckout) throw U.error('gitcheckout', inst.realDir);
+      progress(title, 'İndiriliyor…');
+      const bytes = await U.downloadPackage(l);
+      progress(title, 'Paket açılıyor ve denetleniyor…');
+      const files = U.extractPackage(bytes, l.version, extPath);
+      progress(title, 'Yedekleniyor ve kuruluyor…');
+      const r = await U.install(inst.realDir, files, l.version);
+      update.latest = null;
+      renderUpdateChip();
+      afterInstall(r, `v${r.to} kuruldu (önceki: v${r.from}).`);
+    } catch (e) {
+      console.error('[MyInstants] Güncelleme:', e);
+      showUpdateError(e);
+    } finally {
+      update.busy = false;
+    }
+  }
+
+  async function confirmRollback() {
+    if (!U) return;
+    if (!panelVersion) await initVersion();
+    const b = await U.previousBackup(panelVersion).catch(() => null);
+    if (!b) {
+      showUpdateError(U.error('nobackup'), 'Önceki sürüme dön');
+      return;
+    }
+    state.notice = {
+      title: 'Önceki sürüme dön',
+      lines: [`Şu anki sürüm: v${panelVersion}`, `Dönülecek sürüm: v${b.version} (yedek: ${String(b.date).slice(0, 16).replace('T', ' ')})`],
+      actions: [
+        { text: `v${b.version} sürümüne dön`, primary: true, onClick: runRollback },
+        { text: 'Vazgeç', onClick: closeNotice },
+      ],
+    };
+    renderNotice();
+  }
+
+  async function runRollback() {
+    if (update.busy) return;
+    update.busy = true;
+    try {
+      progress('Önceki sürüme dönülüyor…', 'Yedekleniyor ve kuruluyor…');
+      const inst = await U.resolveInstall(extPath);
+      if (inst.gitCheckout) throw U.error('gitcheckout', inst.realDir);
+      const r = await U.rollback(inst.realDir);
+      afterInstall(r, `v${r.to} sürümüne dönüldü (önceki: v${r.from}).`);
+    } catch (e) {
+      console.error('[MyInstants] Geri dönüş:', e);
+      showUpdateError(e, 'Önceki sürüme dönülemedi');
+    } finally {
+      update.busy = false;
+    }
+  }
+
+  // Kurulumdan sonra: manifest değiştiyse Premiere yeniden başlatılmalı; değişmediyse host.jsx + panel yenilenir.
+  function afterInstall(r, headline) {
+    panelVersion = r.to;
+    if (r.manifestChanged) {
+      state.notice = {
+        title: headline,
+        lines: ['Panel ayarları (manifest.xml) değişti: değişikliklerin çalışması için Premiere’i yeniden başlatın.'],
+      };
+      renderNotice();
+      return;
+    }
+    progress(headline, 'Panel yenileniyor…');
+    setTimeout(reloadPanel, 600);
+  }
+
+  function callHostRaw(script) {
+    return new Promise((resolve) => {
+      if (!cs) return resolve('');
+      cs.evalScript(script, (res) => resolve(String(res)));
+    });
+  }
+
+  async function reloadPanel() {
+    if (extPath) {
+      const hostJsx = extPath.replace(/[\\/]+$/, '') + '/jsx/host.jsx';
+      const res = await callHostRaw(`$.evalFile(new File(${JSON.stringify(hostJsx)})); "ok"`);
+      if (res !== 'ok') console.warn('[MyInstants] host.jsx yeniden yüklenemedi:', res);
+    }
+    location.reload();
+  }
+
+  async function updateDiagLines() {
+    const lines = ['Panel sürümü: ' + (panelVersion ? 'v' + panelVersion : 'okunamadı')];
+    if (extPath && U) {
+      try {
+        const inst = await U.resolveInstall(extPath);
+        lines.push('Kurulum: ' + (inst.linked ? 'bağlantı (junction) → ' + inst.realDir : 'kopya → ' + inst.realDir));
+        if (inst.gitCheckout) lines.push('Kurulum bir git klasöründe: otomatik güncelleme kapalı');
+      } catch (e) {
+        lines.push('Kurulum klasörü okunamadı: ' + e.message);
+      }
+      const b = await U.previousBackup(panelVersion).catch(() => null);
+      lines.push('Önceki sürüm yedeği: ' + (b ? 'v' + b.version : 'yok'));
+    }
+    const when = update.lastCheck ? new Date(update.lastCheck).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }) : '';
+    if (update.lastError) lines.push(`Güncelleme denetimi (${when}): yapılamadı — ${UPDATE_TEXT[update.lastError.kind] || update.lastError.message}`);
+    else if (update.latest) lines.push(`Güncelleme (${when}): v${update.latest.version} hazır`);
+    else if (update.lastCheck) lines.push(`Güncelleme (${when}): güncel`);
+    else lines.push('Güncelleme: henüz denetlenmedi');
+    return lines;
+  }
+
+  // Premiere'in panel menüsü (≡)
+  const FLYOUT = {
+    reload: { label: 'Paneli yeniden yükle', run: () => reloadPanel() },
+    checkUpdates: { label: 'Güncellemeleri denetle', run: () => checkForUpdates(true) },
+    rollback: { label: 'Önceki sürüme dön', run: () => confirmRollback() },
+    diag: { label: 'Teşhis', run: () => runDiagnostics() },
+  };
+
+  function menuIdOf(ev) {
+    let d = ev && ev.data;
+    if (typeof d === 'string') {
+      try {
+        d = JSON.parse(d);
+      } catch (e) {
+        const m = /menuId["']?\s*[:=]\s*["']?([\w-]+)/.exec(d);
+        return m ? m[1] : d;
+      }
+    }
+    return d && d.menuId;
+  }
+
+  function setupFlyoutMenu() {
+    if (!cs) return;
+    const item = (id) => `<MenuItem Id="${id}" Label="${FLYOUT[id].label}" Enabled="true" Checked="false"/>`;
+    const xml = `<Menu>${item('reload')}${item('checkUpdates')}${item('rollback')}<MenuItem Label="---"/>${item('diag')}</Menu>`;
+    try {
+      cs.setPanelFlyoutMenu(xml);
+      cs.addEventListener('com.adobe.csxs.events.flyoutMenuClicked', (ev) => {
+        const entry = FLYOUT[menuIdOf(ev)];
+        if (entry) entry.run();
+      });
+    } catch (e) {
+      console.warn('[MyInstants] Panel menüsü kurulamadı:', e);
+    }
+  }
+
+  el.updateChip.addEventListener('click', showUpdateOffer);
 
   /* ------------------------------------------------------------------ liste */
 
@@ -944,7 +1223,12 @@
   updateChrome();
   pingHost();
   loadList(true);
+  setupFlyoutMenu();
+  initVersion().then(() => {
+    setTimeout(() => checkForUpdates(false), UPDATE_FIRST_DELAY_MS);
+    setInterval(() => checkForUpdates(false), UPDATE_INTERVAL_MS);
+  });
 
   // Hata ayıklama ve testler için
-  window.MyInstantsPanel = { state, preview, loadList, verify, runDiagnostics };
+  window.MyInstantsPanel = { state, preview, loadList, verify, runDiagnostics, checkForUpdates, update };
 })();

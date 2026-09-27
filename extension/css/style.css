@@ -258,4 +258,21 @@ button { cursor: pointer; }
   white-space: pre-wrap;
   user-select: text;
 }
-.msg.info .retry { display: block; margin: 8px auto 0; }
+
+/* alt çubuktaki güncelleme uyarısı */
+.update-chip {
+  flex-shrink: 0;
+  padding: 0 7px;
+  background: var(--accent);
+  border: 0;
+  border-radius: 8px;
+  color: var(--accent-text);
+  font-size: 10.5px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+.update-chip:hover { filter: brightness(1.1); }
+.status { align-items: center; }
+#statusText { flex: 1; min-width: 0; }
+.msg.info .actions { display: flex; justify-content: center; flex-wrap: wrap; gap: 0 6px; margin-top: 4px; }
+.msg.info .actions .retry { display: inline-block; margin: 6px 0 0; }
