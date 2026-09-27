@@ -110,9 +110,9 @@ Panel Premiere'de açıkken Chrome'da `http://localhost:8871` → panelin Consol
 
 1. `release-notes/vX.Y.Z.md` dosyasına kısa Türkçe değişiklik notunu yazın ve commit'leyin.
 2. `npm run release -- X.Y.Z` (denemek için sonuna `--dry-run`).
-   Testler çalışır → sürüm manifest/package.json'da yükseltilir → paket denenir → commit → `main`'e gönderilir →
-   `vX.Y.Z` etiketi atılır. GitHub Actions etiketi görünce ZIP + `release.json`'ı hazırlayıp Release'i yayınlar
-   (kişisel token gerekmez).
+   Testler çalışır → sürüm manifest/package.json'da yükseltilir → paket denenir → commit → `main`'e gönderilir.
+   GitHub Actions `main`'deki yeni sürümü görünce testleri çalıştırır, ZIP + `release.json`'ı hazırlar,
+   `vX.Y.Z` etiketini atar ve Release'i yayınlar (kişisel token gerekmez).
 
 ## Geliştirici testleri (isteğe bağlı, Node.js gerekir)
 

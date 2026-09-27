@@ -8,9 +8,10 @@
 //   1. Not dosyası, temiz çalışma alanı ve sürümün mevcut sürümden büyük olduğu denetlenir.
 //   2. Testler çalıştırılır (npm test).
 //   3. manifest.xml, package.json ve package-lock.json'daki sürüm yükseltilir; paket denemesi yapılır.
-//   4. Commit → main'e gönderilir (yalnızca ileri sarma) → vX.Y.Z etiketi atılır ve gönderilir.
-//   5. GitHub Actions (.github/workflows/release.yml) etiketi görünce ZIP + release.json'ı hazırlar
-//      ve Release'i not dosyasıyla yayınlar. Kişisel token gerekmez.
+//   4. Commit → main'e gönderilir (yalnızca ileri sarma).
+//   5. GitHub Actions (.github/workflows/release.yml) main'deki yeni sürümü görünce testleri çalıştırır,
+//      ZIP + release.json'ı hazırlar, vX.Y.Z etiketini atar ve Release'i not dosyasıyla yayınlar.
+//      Kişisel token gerekmez; etiketi de GitHub oluşturur.
 //
 // RELEASE_COMMIT_TRAILERS ortam değişkeni varsa commit mesajının sonuna eklenir.
 'use strict';
@@ -56,11 +57,11 @@ if (dirty) fail('Çalışma alanında commit edilmemiş değişiklik var:\n' + d
 const manifest = fs.readFileSync(MANIFEST, 'utf8');
 const current = (/ExtensionBundleVersion="([^"]+)"/.exec(manifest) || [])[1];
 if (!current || cmp(version, current) <= 0) fail(`Yeni sürüm (${version}) mevcut sürümden (${current}) büyük olmalı.`);
-if (git('tag', '--list', tag)) fail(`${tag} etiketi zaten var.`);
+if (git('tag', '--list', tag) || git('ls-remote', '--tags', 'origin', tag)) fail(`${tag} etiketi zaten var.`);
 console.log(`Sürüm: ${current} → ${version}${dryRun ? '  (deneme, gönderilmeyecek)' : ''}`);
 
 // 2) Testler
-console.log('\n[1/4] Testler çalışıyor…');
+console.log('\n[1/3] Testler çalışıyor…');
 try {
   sh('npm', ['test'], { stdio: 'inherit' });
 } catch (e) {
@@ -68,7 +69,7 @@ try {
 }
 
 // 3) Sürüm yükseltme + paket denemesi
-console.log('\n[2/4] Sürüm yükseltiliyor ve paket deneniyor…');
+console.log('\n[2/3] Sürüm yükseltiliyor ve paket deneniyor…');
 fs.writeFileSync(
   MANIFEST,
   manifest
@@ -97,8 +98,8 @@ if (dryRun) {
   process.exit(0);
 }
 
-// 4) Commit, main, etiket
-console.log('\n[3/4] Commit ve main…');
+// 4) Commit ve main (etiketi ve Release'i GitHub Actions oluşturur)
+console.log('\n[3/3] Commit ve main…');
 const trailers = (process.env.RELEASE_COMMIT_TRAILERS || '').trim();
 git('add', '-A');
 git('commit', '-q', '-m', `Sürüm ${tag}` + (trailers ? '\n\n' + trailers : ''));
@@ -107,12 +108,8 @@ try {
   sh('git', ['push', 'origin', 'HEAD:main'], { stdio: 'inherit' });
   if (branch !== 'main' && branch !== 'HEAD') sh('git', ['push', 'origin', 'HEAD:' + branch], { stdio: 'inherit' });
 } catch (e) {
-  fail('main\'e gönderilemedi (ileri sarma değil mi?). Etiket atılmadı.');
+  fail('main\'e gönderilemedi (ileri sarma değil mi?).');
 }
 
-console.log('\n[4/4] Etiket…');
-git('tag', '-a', tag, '-m', `MyInstants ${tag}`);
-sh('git', ['push', 'origin', tag], { stdio: 'inherit' });
-
 const remote = git('remote', 'get-url', 'origin').replace(/\.git$/, '').replace(/^git@github\.com:/, 'https://github.com/');
-console.log(`\nTamam. GitHub Actions sürümü yayınlıyor:\n  ${remote}/actions\n  ${remote}/releases/tag/${tag}`);
+console.log(`\nTamam. GitHub Actions ${tag} etiketini ve Release'i oluşturuyor (1-2 dk):\n  ${remote}/actions\n  ${remote}/releases/tag/${tag}`);

@@ -1,47 +1,70 @@
-# vX.Y.Z etiketi gönderilince sürüm paketini hazırlar ve GitHub Release'i yayınlar.
+# main dalına yeni bir sürüm (extension/CSXS/manifest.xml'deki ExtensionBundleVersion) gelince:
+# o sürümün Release'i yoksa testleri çalıştırır, paketi (ZIP + release.json) hazırlar,
+# vX.Y.Z etiketini main'deki commit'e atar ve Release'i release-notes/vX.Y.Z.md notuyla yayınlar.
 # Kişisel token gerekmez: GitHub'ın bu iş için verdiği geçici yetki (github.token) kullanılır.
 name: Sürüm yayınla
 
 on:
   push:
-    tags: ['v*.*.*']
+    branches: [main]
+    paths:
+      - 'extension/CSXS/manifest.xml'
+      - 'release-notes/**'
+      - '.github/workflows/release.yml'
+  workflow_dispatch:
 
 permissions:
   contents: write
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   release:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     env:
+      GH_TOKEN: ${{ github.token }}
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Etiket main dalında mı?
+      - name: Sürüm ve Release durumu
+        id: v
         run: |
-          git fetch origin main
-          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "Etiket main dalında değil"; exit 1; }
+          V=$(sed -n 's/.*ExtensionBundleVersion="\([0-9]*\.[0-9]*\.[0-9]*\)".*/\1/p' extension/CSXS/manifest.xml | head -1)
+          test -n "$V" || { echo "manifest.xml'de sürüm bulunamadı"; exit 1; }
+          echo "tag=v$V" >> "$GITHUB_OUTPUT"
+          if gh release view "v$V" >/dev/null 2>&1; then
+            echo "v$V zaten yayınlanmış; yapılacak bir şey yok."
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            test -s "release-notes/v$V.md" || { echo "release-notes/v$V.md yok ya da boş"; exit 1; }
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - uses: actions/setup-node@v4
+        if: steps.v.outputs.exists == 'false'
         with:
           node-version: 22
 
       - name: Testler
+        if: steps.v.outputs.exists == 'false'
         run: |
           npm ci
           npm test
 
       - name: Paket (ZIP + release.json)
-        run: node tools/build-release.js "$GITHUB_REF_NAME"
+        if: steps.v.outputs.exists == 'false'
+        run: node tools/build-release.js "${{ steps.v.outputs.tag }}"
 
-      - name: Release yayınla
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Etiket + Release
+        if: steps.v.outputs.exists == 'false'
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            "dist/MyInstants-${GITHUB_REF_NAME}.zip" dist/release.json \
-            --title "MyInstants ${GITHUB_REF_NAME}" \
-            --notes-file "release-notes/${GITHUB_REF_NAME}.md" \
-            --verify-tag
+          TAG="${{ steps.v.outputs.tag }}"
+          gh release create "$TAG" \
+            "dist/MyInstants-$TAG.zip" dist/release.json \
+            --target "$GITHUB_SHA" \
+            --title "MyInstants $TAG" \
+            --notes-file "release-notes/$TAG.md"
