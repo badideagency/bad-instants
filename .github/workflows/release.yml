@@ -1,0 +1,47 @@
+# vX.Y.Z etiketi gönderilince sürüm paketini hazırlar ve GitHub Release'i yayınlar.
+# Kişisel token gerekmez: GitHub'ın bu iş için verdiği geçici yetki (github.token) kullanılır.
+name: Sürüm yayınla
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Etiket main dalında mı?
+        run: |
+          git fetch origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "Etiket main dalında değil"; exit 1; }
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Testler
+        run: |
+          npm ci
+          npm test
+
+      - name: Paket (ZIP + release.json)
+        run: node tools/build-release.js "$GITHUB_REF_NAME"
+
+      - name: Release yayınla
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            "dist/MyInstants-${GITHUB_REF_NAME}.zip" dist/release.json \
+            --title "MyInstants ${GITHUB_REF_NAME}" \
+            --notes-file "release-notes/${GITHUB_REF_NAME}.md" \
+            --verify-tag
