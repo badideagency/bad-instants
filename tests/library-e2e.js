@@ -136,13 +136,27 @@ async function main() {
   await page.locator('#notice button', { hasText: 'Tamam' }).click();
   assert.equal(await page.locator('#libChip').isHidden(), true);
   assert.equal(await page.locator('#notice').isHidden(), true);
-  // 340 px'te yeni sekmeler sağda kalır: kenar soluk, fare tekerleği yatay kaydırır
-  assert.equal(await page.locator('#tabs').evaluate((t) => t.classList.contains('more-right')), true);
+  // Favoriler ve Son kullanılanlar en solda sabit (ikon + ipucu); yalnız site sekmeleri kayar
+  const pinned = () =>
+    page.evaluate(() =>
+      [...document.querySelectorAll('.tabs-pinned button')].map((b) => {
+        const r = b.getBoundingClientRect();
+        return { tab: b.dataset.tab, title: b.title, label: b.getAttribute('aria-label'), left: r.left, inView: r.left >= 0 && r.right <= innerWidth };
+      })
+    );
+  const before = await pinned();
+  assert.deepEqual(
+    before.map((p) => [p.tab, p.title, p.label, p.inView]),
+    [['favorites', 'Favoriler', 'Favoriler', true], ['used', 'Son kullanılanlar', 'Son kullanılanlar', true]]
+  );
+  assert.equal(await page.locator('#siteTabs').evaluate((t) => t.classList.contains('more-right')), true);
   await page.locator('#tabs button[data-tab="best"]').hover();
   await page.mouse.wheel(0, 400);
-  await page.waitForFunction(() => document.querySelector('#tabs').scrollLeft > 0);
-  assert.equal(await page.locator('#tabs').evaluate((t) => t.classList.contains('more-left')), true);
+  await page.waitForFunction(() => document.querySelector('#siteTabs').scrollLeft > 0);
+  assert.equal(await page.locator('#siteTabs').evaluate((t) => t.classList.contains('more-left')), true);
+  assert.deepEqual((await pinned()).map((p) => p.left), before.map((p) => p.left)); // ikonlar kaymadı
   await tab(page, 'favorites');
+  assert.equal(await page.locator('#tabs button[data-tab="favorites"]').getAttribute('aria-selected'), 'true');
   assert.match(await page.locator('#listEnd').textContent(), /Henüz favori yok\. Bir sesin yanındaki yıldıza tıklayın\./);
   await tab(page, 'used');
   assert.match(await page.locator('#listEnd').textContent(), /Henüz kullanılan ses yok/);

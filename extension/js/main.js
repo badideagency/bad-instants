@@ -42,6 +42,7 @@
     volume: $('volume'),
     volumeLabel: $('volumeLabel'),
     tabs: $('tabs'),
+    siteTabs: $('siteTabs'),
     categoryBar: $('categoryBar'),
     categorySelect: $('categorySelect'),
     searchBar: $('searchBar'),
@@ -1463,18 +1464,19 @@
 
   /* ------------------------------------------------------------------ üst kontroller */
 
-  // Dar panelde sekmeler yatay kayar: devamı olan kenar soluklaşır, fare tekerleği de yatay kaydırır
+  // Favoriler ve Son kullanılanlar en solda sabit (ikon). Dar panelde yalnız site sekmeleri yatay kayar:
+  // devamı olan kenar soluklaşır, fare tekerleği de yatay kaydırır.
   function updateTabEdges() {
-    const t = el.tabs;
+    const t = el.siteTabs;
     t.classList.toggle('more-left', t.scrollLeft > 1);
     t.classList.toggle('more-right', t.scrollLeft + t.clientWidth < t.scrollWidth - 1);
   }
-  el.tabs.addEventListener('scroll', updateTabEdges, { passive: true });
+  el.siteTabs.addEventListener('scroll', updateTabEdges, { passive: true });
   window.addEventListener('resize', updateTabEdges);
-  el.tabs.addEventListener(
+  el.siteTabs.addEventListener(
     'wheel',
     (e) => {
-      const t = el.tabs;
+      const t = el.siteTabs;
       if (t.scrollWidth <= t.clientWidth || Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
       e.preventDefault();
       t.scrollLeft += e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY; // bazı fareler satır cinsinden verir
@@ -1486,7 +1488,7 @@
     el.tabs.querySelectorAll('button').forEach((b) => {
       b.classList.toggle('active', b.dataset.tab === state.tab);
       b.setAttribute('aria-selected', b.dataset.tab === state.tab ? 'true' : 'false');
-      if (b.dataset.tab === state.tab && b.scrollIntoView) b.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      if (b.dataset.tab === state.tab && el.siteTabs.contains(b)) b.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     });
     updateTabEdges();
 

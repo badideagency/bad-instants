@@ -25,6 +25,9 @@ Teşhis: alt çubuktaki yeşil "Premiere … ✓" yazısına ya da panel menüs�
 
 ## Favoriler ve Son kullanılanlar
 
+- **Sekmeler:** Favoriler (yıldız ikonu) ve Son kullanılanlar (saat ikonu) sekme çubuğunun en solunda sabittir, her
+  genişlikte görünür (üstüne gelince adı yazar). İnce ayraçtan sonra site sekmeleri gelir; sığmazsa yalnız onlar
+  yatay kayar (fare tekerleğiyle de).
 - **Yıldız:** Her sesin yanındaki yıldıza tıklayınca ses **Favoriler** sekmesine eklenir (son eklenen üstte, sınır yok).
   Favoriler sekmesinde yıldızı kaldırılan ses soluklaşır; sekmeden çıkana kadar geri yıldızlanabilir.
 - **Son kullanılanlar:** İndir ile timeline'a başarıyla konan son 50 ses (en yeni üstte). Önizleme sayılmaz.

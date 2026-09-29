@@ -79,10 +79,10 @@ button { margin: 0; padding: 0; background: none; border: 0; cursor: pointer; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 /* Basılabilir her şey: kısa renk geçişi + basışta hafif küçülme (sık tekrarlanan hover'da hareket yok) */
-.icon-btn, .seg button, .tabs button, .fav, .dl, .btn, .retry, .more-btn, .update-chip, .lib-chip, .link-btn, .host {
+.icon-btn, .seg button, .tabbar button, .fav, .dl, .btn, .retry, .more-btn, .update-chip, .lib-chip, .link-btn, .host {
   transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease, transform 160ms var(--ease-out);
 }
-.icon-btn:active, .seg:not(.disabled) button:active, .tabs button:active, .fav:active, .dl:not(.busy):active,
+.icon-btn:active, .seg:not(.disabled) button:active, .tabbar button:active, .fav:active, .dl:not(.busy):active,
 .btn:active, .retry:active, .more-btn:active, .update-chip:active, .lib-chip:active { transform: scale(0.97); }
 
 /* Görünür odak halkası (klavye) */
@@ -192,21 +192,26 @@ button { margin: 0; padding: 0; background: none; border: 0; cursor: pointer; }
 .volume .pct { width: 3.2em; text-align: right; font-size: var(--fs-yogun); font-variant-numeric: tabular-nums; }
 
 /* ---------- sekmeler ---------- */
-.tabbar { flex-shrink: 0; border-bottom: 1px solid var(--kenar-zayif); }
+/* En solda sabit ikon sekmeler (Favoriler: yıldız, Son kullanılanlar: saat) | ayraç | kayan site sekmeleri */
+.tabbar { display: flex; flex-shrink: 0; padding-left: 6px; border-bottom: 1px solid var(--kenar-zayif); }
+.tabs-pinned { display: flex; flex-shrink: 0; gap: 2px; }
+.tabbar .tab-sep { flex-shrink: 0; align-self: center; width: 1px; height: 14px; margin: 0 10px 0 6px; background: var(--kenar-guclu); }
 .tabs {
   display: flex;
+  flex: 1;
+  min-width: 0;
   gap: 14px;
-  padding: 0 10px;
+  padding: 0 10px 0 0;
   overflow-x: auto;
   scroll-padding: 0 32px; /* seçilen sekme soluk kenarın altında kalmasın */
   scrollbar-width: none;
 }
-/* Sığmayan sekmeler: devamı olan kenar soluklaşır (işlevsel ipucu, süs değil); fare tekerleği yatay kaydırır */
+/* Sığmayan site sekmeleri: devamı olan kenar soluklaşır (işlevsel ipucu, süs değil); fare tekerleği yatay kaydırır */
 .tabs.more-right { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent); }
 .tabs.more-left { -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 32px), transparent); }
 .tabs.more-left.more-right { -webkit-mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent); }
-.tabs::-webkit-scrollbar { display: none; } /* dar panelde sekmeler kesilmez, yatay kayar */
-.tabs button {
+.tabs::-webkit-scrollbar { display: none; }
+.tabbar button {
   position: relative;
   flex-shrink: 0;
   height: 28px;
@@ -214,13 +219,15 @@ button { margin: 0; padding: 0; background: none; border: 0; cursor: pointer; }
   font-weight: 500;
   white-space: nowrap;
 }
+.tabbar .icon-tab { display: inline-grid; place-items: center; width: 26px; }
 @media (max-width: 300px) {
-  .tabs { gap: 10px; padding: 0 8px; }
+  .tabbar { padding-left: 4px; }
+  .tabbar .tab-sep { margin: 0 8px 0 4px; }
+  .tabs { gap: 10px; padding-right: 8px; }
 }
-.tabs button:hover { color: var(--metin); }
-.tabs button.active { color: var(--metin); }
-.tabs .tab-sep { flex-shrink: 0; align-self: center; width: 1px; height: 12px; margin: 0 -4px; background: var(--kenar-guclu); } /* site listeleri | kendi listelerim */
-.tabs button.active::after {
+.tabbar button:hover { color: var(--metin); }
+.tabbar button.active { color: var(--metin); }
+.tabbar button.active::after {
   content: '';
   position: absolute;
   left: 0;
@@ -433,5 +440,5 @@ button { margin: 0; padding: 0; background: none; border: 0; cursor: pointer; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition-duration: 0ms !important; }
   .notice { animation: none; }
-  .icon-btn:active, .seg button:active, .tabs button:active, .fav:active, .dl:active, .btn:active, .retry:active, .more-btn:active, .update-chip:active, .lib-chip:active { transform: none; }
+  .icon-btn:active, .seg button:active, .tabbar button:active, .fav:active, .dl:active, .btn:active, .retry:active, .more-btn:active, .update-chip:active, .lib-chip:active { transform: none; }
 }

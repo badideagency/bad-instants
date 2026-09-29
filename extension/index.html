@@ -27,17 +27,21 @@
     </label>
   </div>
 
-  <div class="tabbar">
-  <nav id="tabs" class="tabs" role="tablist" aria-label="Listeler">
-    <button type="button" role="tab" data-tab="trending">Trending</button>
-    <button type="button" role="tab" data-tab="best">Hall of Fame</button>
-    <button type="button" role="tab" data-tab="recent">Just Added</button>
-    <button type="button" role="tab" data-tab="category">Kategoriler</button>
+  <nav id="tabs" class="tabbar" role="tablist" aria-label="Listeler">
+    <!-- Kendi listelerim: en solda, sabit, yalnız ikon (her genişlikte görünür) -->
+    <div class="tabs-pinned">
+      <button type="button" role="tab" class="icon-tab" data-tab="favorites" title="Favoriler" aria-label="Favoriler"><i data-icon="star" data-size="14"></i></button>
+      <button type="button" role="tab" class="icon-tab" data-tab="used" title="Son kullanılanlar" aria-label="Son kullanılanlar"><i data-icon="history" data-size="14"></i></button>
+    </div>
     <span class="tab-sep" aria-hidden="true"></span>
-    <button type="button" role="tab" data-tab="favorites">Favoriler</button>
-    <button type="button" role="tab" data-tab="used">Son kullanılanlar</button>
+    <!-- Site listeleri: sığmazsa yalnız bunlar yatay kayar -->
+    <div id="siteTabs" class="tabs">
+      <button type="button" role="tab" data-tab="trending">Trending</button>
+      <button type="button" role="tab" data-tab="best">Hall of Fame</button>
+      <button type="button" role="tab" data-tab="recent">Just Added</button>
+      <button type="button" role="tab" data-tab="category">Kategoriler</button>
+    </div>
   </nav>
-  </div>
 
   <div id="categoryBar" class="subbar" hidden>
     <div class="select">

@@ -120,12 +120,25 @@ async function main() {
   await shot(page, '04b-yildizlar');
   await page.locator('#tabs button[data-tab="favorites"]').click();
   await page.waitForFunction(() => document.querySelectorAll('#rows .row').length === 2);
-  const faded = await page.evaluate(() => {
-    const t = document.querySelector('#tabs').getBoundingClientRect();
-    const b = document.querySelector('#tabs button.active').getBoundingClientRect();
-    return b.left >= t.left + 31 && b.right <= t.right - 31; // seçili sekme soluk kenarın altında değil
+  // Seçili ikon sekme, yazılı sekmelerle aynı seçili görünümde (krem renk + 2 px alt çizgi)
+  const look = await page.evaluate(() => {
+    const still = document.createElement('style'); // geçiş animasyonu ölçümü bozmasın
+    still.textContent = '* { transition: none !important; }';
+    document.head.append(still);
+    const pick = (b) => {
+      const a = getComputedStyle(b, '::after');
+      return { color: getComputedStyle(b).color, line: a.height + ' ' + a.backgroundColor + ' ' + a.borderRadius };
+    };
+    const fav = pick(document.querySelector('#tabs button[data-tab="favorites"]'));
+    const text = document.querySelector('#tabs button[data-tab="trending"]');
+    text.classList.add('active');
+    const ref = pick(text);
+    text.classList.remove('active');
+    still.remove();
+    return { fav, ref };
   });
-  assert.ok(faded, 'seçili sekme soluk kenarın altında kalıyor');
+  assert.deepEqual(look.fav, look.ref, 'seçili ikon sekme farklı görünüyor');
+  assert.match(look.fav.line, /^2px rgb\(255, 247, 233\)/);
   await page.locator('#rows .row').nth(1).locator('.fav').click();
   await page.waitForFunction(() => document.querySelector('#rows .row.removed'));
   await page.mouse.move(5, 5);
@@ -135,7 +148,7 @@ async function main() {
   await shot(page, '04d-son-kullanilanlar-bos');
   await page.locator('#tabs button[data-tab="trending"]').click();
   await page.waitForFunction(() => document.querySelectorAll('#rows .row').length > 0 && !window.MyInstantsPanel.state.loading);
-  step('Favoriler: yıldızlar, Favoriler sekmesi (soluk satır), boş Son kullanılanlar çekildi; seçili sekme görünür');
+  step('Favoriler: yıldızlar, Favoriler sekmesi (soluk satır), boş Son kullanılanlar çekildi; seçili ikon sekme yazılılarla aynı görünümde');
 
   /* 2) Mesaj kutuları */
   site.state.mode = 'challenge';
@@ -195,9 +208,26 @@ async function main() {
     [...document.querySelectorAll('#tabs button')].filter((b) => b.scrollWidth > b.clientWidth).map((b) => b.textContent)
   );
   assert.deepEqual(clipped, [], 'dar panelde kesilen sekme var');
+  // Favoriler ve Son kullanılanlar dar panelde de ekranda; site sekmeleri kayıyor
+  const pinnedIn = await page.evaluate(() =>
+    [...document.querySelectorAll('.tabs-pinned button')].every((b) => b.getBoundingClientRect().right <= innerWidth)
+  );
+  assert.ok(pinnedIn, 'dar panelde Favoriler / Son kullanılanlar ekran dışında');
   await shot(page, '12-dar-240px');
+  // Seçilen site sekmesi soluk kenarın altında kalmasın
+  await page.locator('#tabs button[data-tab="category"]').click();
+  await page.waitForFunction(() => document.querySelectorAll('#categorySelect option').length > 0);
+  const underFade = await page.evaluate(() => {
+    const s = document.querySelector('#siteTabs');
+    const t = s.getBoundingClientRect();
+    const b = s.querySelector('button.active').getBoundingClientRect();
+    return (s.classList.contains('more-right') && b.right > t.right - 31) || (s.classList.contains('more-left') && b.left < t.left + 31);
+  });
+  assert.equal(underFade, false, 'seçili site sekmesi soluk kenarın altında');
+  await page.locator('#tabs button[data-tab="favorites"]').click();
+  await shot(page, '12b-dar-240px-favoriler');
   await ctx.close();
-  step('240 px dar panel: yatay taşma yok, sekme adları kesilmiyor (gerekirse yatay kayıyor)');
+  step('240 px dar panel: yatay taşma yok, Favoriler / Son kullanılanlar ekranda, site sekmeleri kesilmeden kayıyor');
 
   await browser.close();
   await site.stop();
