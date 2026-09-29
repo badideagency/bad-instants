@@ -1,6 +1,6 @@
 {
   "name": "bad-instants",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "private": true,
   "description": "MyInstants — Premiere Pro (CEP) paneli. Bu dosya yalnızca geliştirme testleri içindir; panelin çalışması için gerekmez.",
   "scripts": {
