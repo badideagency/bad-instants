@@ -79,11 +79,11 @@ button { margin: 0; padding: 0; background: none; border: 0; cursor: pointer; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 /* Basılabilir her şey: kısa renk geçişi + basışta hafif küçülme (sık tekrarlanan hover'da hareket yok) */
-.icon-btn, .seg button, .tabs button, .dl, .btn, .retry, .more-btn, .update-chip, .link-btn, .host {
+.icon-btn, .seg button, .tabs button, .fav, .dl, .btn, .retry, .more-btn, .update-chip, .lib-chip, .link-btn, .host {
   transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease, transform 160ms var(--ease-out);
 }
-.icon-btn:active, .seg:not(.disabled) button:active, .tabs button:active, .dl:not(.busy):active,
-.btn:active, .retry:active, .more-btn:active, .update-chip:active { transform: scale(0.97); }
+.icon-btn:active, .seg:not(.disabled) button:active, .tabs button:active, .fav:active, .dl:not(.busy):active,
+.btn:active, .retry:active, .more-btn:active, .update-chip:active, .lib-chip:active { transform: scale(0.97); }
 
 /* Görünür odak halkası (klavye) */
 :focus { outline: none; }
@@ -192,14 +192,19 @@ button { margin: 0; padding: 0; background: none; border: 0; cursor: pointer; }
 .volume .pct { width: 3.2em; text-align: right; font-size: var(--fs-yogun); font-variant-numeric: tabular-nums; }
 
 /* ---------- sekmeler ---------- */
+.tabbar { flex-shrink: 0; border-bottom: 1px solid var(--kenar-zayif); }
 .tabs {
   display: flex;
   gap: 14px;
   padding: 0 10px;
   overflow-x: auto;
+  scroll-padding: 0 32px; /* seçilen sekme soluk kenarın altında kalmasın */
   scrollbar-width: none;
-  border-bottom: 1px solid var(--kenar-zayif);
 }
+/* Sığmayan sekmeler: devamı olan kenar soluklaşır (işlevsel ipucu, süs değil); fare tekerleği yatay kaydırır */
+.tabs.more-right { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent); }
+.tabs.more-left { -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 32px), transparent); }
+.tabs.more-left.more-right { -webkit-mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent); }
 .tabs::-webkit-scrollbar { display: none; } /* dar panelde sekmeler kesilmez, yatay kayar */
 .tabs button {
   position: relative;
@@ -214,6 +219,7 @@ button { margin: 0; padding: 0; background: none; border: 0; cursor: pointer; }
 }
 .tabs button:hover { color: var(--metin); }
 .tabs button.active { color: var(--metin); }
+.tabs .tab-sep { flex-shrink: 0; align-self: center; width: 1px; height: 12px; margin: 0 -4px; background: var(--kenar-guclu); } /* site listeleri | kendi listelerim */
 .tabs button.active::after {
   content: '';
   position: absolute;
@@ -269,6 +275,23 @@ button { margin: 0; padding: 0; background: none; border: 0; cursor: pointer; }
 .row.buffering .lead .icon-loader-circle { display: block; animation: spin 700ms linear infinite; }
 .row.error .lead .icon-circle-alert { display: block; color: var(--tehlike-metin); }
 .row.error .name { color: var(--tehlike-metin); }
+
+/* Yıldız: boş = sönük (satırın üstüne gelince parlar), favori = dolu krem, hep görünür. Durum rengi yok. */
+.fav {
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--r-sm);
+  color: var(--metin-sonuk);
+}
+.row:hover .fav, .row:focus-within .fav, .row.playing .fav, .fav:hover { color: var(--metin); }
+.fav:hover { background: var(--yuzey-3); }
+.fav.on { color: var(--metin); }
+.fav.on .icon { fill: currentColor; }
+/* Favoriler sekmesinde yıldızı kaldırılan satır: sekmeden çıkana kadar soluk kalır, yeniden yıldızlanabilir */
+.row.removed .lead, .row.removed .name, .row.removed .dl { opacity: 0.5; }
 
 .dl {
   display: inline-flex;
@@ -331,9 +354,11 @@ button { margin: 0; padding: 0; background: none; border: 0; cursor: pointer; }
 .msg.error .head .icon { color: var(--tehlike-metin); }
 .msg.challenge .head .icon { color: var(--surec-metin); }
 .msg.info .head .icon { color: var(--bilgi-metin); }
+.msg.warn .head .icon { color: var(--tehlike-metin); }
 .msg .title { color: var(--metin); font-size: var(--fs-baslik); font-weight: 600; }
 .msg .body { color: var(--metin); }
 .msg .detail { color: var(--metin-sonuk); font-size: var(--fs-yogun); user-select: text; }
+.msg .body, .msg .detail, .msg pre { overflow-wrap: anywhere; } /* uzun dosya yolları kutuyu genişletmesin */
 .msg .notes { display: grid; gap: 2px; max-height: 180px; overflow: auto; color: var(--metin); user-select: text; }
 .msg .notes .body:empty { height: 4px; }
 .msg .actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 4px; }
@@ -380,7 +405,7 @@ button { margin: 0; padding: 0; background: none; border: 0; cursor: pointer; }
 .host.ok::before { background: var(--basari-metin); }
 .host.bad::before { background: var(--tehlike-metin); }
 
-.update-chip {
+.update-chip, .lib-chip {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -394,6 +419,10 @@ button { margin: 0; padding: 0; background: none; border: 0; cursor: pointer; }
   font-weight: 500;
 }
 .update-chip:hover { background: var(--bilgi-kenar); }
+/* favoriler dosyası bozuktu uyarısı */
+.lib-chip { flex-shrink: 1; min-width: 0; background: var(--tehlike-yuzey); border-color: var(--tehlike-kenar); color: var(--tehlike-metin); }
+.lib-chip:hover { background: var(--tehlike-kenar); }
+.lib-chip span { min-width: 0; overflow: hidden; text-overflow: ellipsis; } /* dar panelde kısalır */
 
 /* ---------- kaydırma çubuğu: yüzey merdiveninin bir adımı ---------- */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
@@ -404,5 +433,5 @@ button { margin: 0; padding: 0; background: none; border: 0; cursor: pointer; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition-duration: 0ms !important; }
   .notice { animation: none; }
-  .icon-btn:active, .seg button:active, .tabs button:active, .dl:active, .btn:active, .retry:active, .more-btn:active, .update-chip:active { transform: none; }
+  .icon-btn:active, .seg button:active, .tabs button:active, .fav:active, .dl:active, .btn:active, .retry:active, .more-btn:active, .update-chip:active, .lib-chip:active { transform: none; }
 }

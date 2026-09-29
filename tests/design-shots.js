@@ -12,6 +12,7 @@ const assert = require('node:assert/strict');
 const { chromium } = require('playwright');
 const { startFakeSite } = require('./fake-site');
 const { createPremiere } = require('./fake-premiere');
+const { createDisk, attachDisk } = require('./fake-disk');
 const Theme = require('../extension/js/theme.js');
 
 const ROOT = path.join(__dirname, '..');
@@ -41,6 +42,7 @@ async function main() {
     const errors = [];
     page.on('pageerror', (e) => errors.push(e.message));
     await page.exposeFunction('__miHost', (script) => premiere.call(script));
+    await attachDisk(page, createDisk(), { appData: 'C:\\Users\\Test\\AppData\\Roaming' }); // favoriler için
     await page.addInitScript((bg) => {
       window.__adobe_cep__ = {
         getHostEnvironment: () =>
@@ -107,8 +109,35 @@ async function main() {
   await shot(page, '04-arama');
   step('Liste / önizleme / İndir durumları / odak / kategoriler / arama çekildi');
 
-  /* 2) Mesaj kutuları */
+  /* Favoriler: yıldızlar, Favoriler sekmesi, soluk satır, boş Son kullanılanlar */
   await page.locator('#searchExit').click();
+  await page.locator('#tabs button[data-tab="trending"]').click();
+  await page.waitForFunction(() => document.querySelectorAll('#rows .row').length > 2 && !window.MyInstantsPanel.state.loading);
+  await page.locator('#rows .row').nth(0).locator('.fav').click();
+  await page.locator('#rows .row').nth(2).locator('.fav').click();
+  await page.waitForFunction(() => document.querySelectorAll('#rows .fav.on').length === 2);
+  await page.mouse.move(5, 5);
+  await shot(page, '04b-yildizlar');
+  await page.locator('#tabs button[data-tab="favorites"]').click();
+  await page.waitForFunction(() => document.querySelectorAll('#rows .row').length === 2);
+  const faded = await page.evaluate(() => {
+    const t = document.querySelector('#tabs').getBoundingClientRect();
+    const b = document.querySelector('#tabs button.active').getBoundingClientRect();
+    return b.left >= t.left + 31 && b.right <= t.right - 31; // seçili sekme soluk kenarın altında değil
+  });
+  assert.ok(faded, 'seçili sekme soluk kenarın altında kalıyor');
+  await page.locator('#rows .row').nth(1).locator('.fav').click();
+  await page.waitForFunction(() => document.querySelector('#rows .row.removed'));
+  await page.mouse.move(5, 5);
+  await shot(page, '04c-favoriler');
+  await page.locator('#tabs button[data-tab="used"]').click();
+  await page.waitForFunction(() => /Henüz kullanılan ses yok/.test(document.querySelector('#listEnd').textContent));
+  await shot(page, '04d-son-kullanilanlar-bos');
+  await page.locator('#tabs button[data-tab="trending"]').click();
+  await page.waitForFunction(() => document.querySelectorAll('#rows .row').length > 0 && !window.MyInstantsPanel.state.loading);
+  step('Favoriler: yıldızlar, Favoriler sekmesi (soluk satır), boş Son kullanılanlar çekildi; seçili sekme görünür');
+
+  /* 2) Mesaj kutuları */
   site.state.mode = 'challenge';
   await page.locator('#refreshBtn').click();
   await page.waitForFunction(() => document.querySelector('#listEnd .challenge'));

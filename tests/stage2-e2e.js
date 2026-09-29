@@ -12,6 +12,7 @@ const assert = require('node:assert/strict');
 const { chromium } = require('playwright');
 const { startFakeSite } = require('./fake-site');
 const { createPremiere } = require('./fake-premiere');
+const { createDisk, attachDisk } = require('./fake-disk');
 
 const ROOT = path.join(__dirname, '..');
 const OUT = path.join(ROOT, 'test-output');
@@ -28,12 +29,11 @@ async function main() {
   const site = await startFakeSite({ certDir: path.join(OUT, 'cert') });
 
   // Bellekte sahte disk
-  const disk = new Map(); // küçük harfli yol → { name, data: Buffer }
-  const diskCtl = { failWrite: null };
-  const key = (p) => p.toLowerCase();
-  const diskFiles = () => [...disk.values()].map((f) => f.name).sort();
+  const disk = createDisk();
+  const diskCtl = disk.ctl;
+  const diskFiles = disk.files;
 
-  let premiere = createPremiere({ onDisk: (p) => disk.has(key(p)) });
+  let premiere = createPremiere({ onDisk: (p) => disk.has(p) });
   premiere.addClip(0, 0, 5, 'Röportaj'); // A1: 0–5 sn; playhead 10 sn
 
   const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/_proxy$/i.test(k)));
@@ -50,32 +50,7 @@ async function main() {
   // CEP köprüsü: evalScript → sahte Premiere
   await page.exposeFunction('__miHost', (script) => premiere.call(script));
   // Node fs → sahte disk
-  await page.exposeFunction('__miFs', (op, p, b64, p2) => {
-    const err = (code) => ({ error: code });
-    switch (op) {
-      case 'stat':
-        return disk.has(key(p)) ? { size: disk.get(key(p)).data.length } : err('ENOENT');
-      case 'mkdir':
-        return {};
-      case 'writeFile':
-        if (diskCtl.failWrite) return err(diskCtl.failWrite);
-        disk.set(key(p), { name: p, data: Buffer.from(b64, 'base64') });
-        return {};
-      case 'rename': {
-        const f = disk.get(key(p));
-        if (!f) return err('ENOENT');
-        disk.delete(key(p));
-        disk.set(key(p2), { name: p2, data: f.data });
-        return {};
-      }
-      case 'unlink':
-        disk.delete(key(p));
-        return {};
-      case 'readFile':
-        return disk.has(key(p)) ? { b64: disk.get(key(p)).data.toString('base64') } : err('ENOENT');
-    }
-    return err('EINVAL');
-  });
+  await attachDisk(page, disk);
   await page.addInitScript(() => {
     window.__adobe_cep__ = {
       getHostEnvironment: () =>
@@ -85,32 +60,6 @@ async function main() {
       removeEventListener() {},
       dispatchEvent() {},
     };
-    const toB64 = (u8) => {
-      let s = '';
-      for (let i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]);
-      return btoa(s);
-    };
-    const fromB64 = (b64) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
-    const call = async (...args) => {
-      const r = await window.__miFs(...args);
-      if (r && r.error) throw Object.assign(new Error(r.error), { code: r.error });
-      return r;
-    };
-    const promises = {
-      stat: async (p) => {
-        const r = await call('stat', p);
-        return { isFile: () => true, size: r.size };
-      },
-      mkdir: (p) => call('mkdir', p),
-      writeFile: (p, bytes) => call('writeFile', p, toB64(bytes)),
-      rename: (a, b) => call('rename', a, null, b),
-      unlink: (p) => call('unlink', p),
-      readFile: async (p) => {
-        const u8 = fromB64((await call('readFile', p)).b64);
-        return u8; // Buffer benzeri: buffer / byteOffset / byteLength
-      },
-    };
-    window.require = (name) => (name === 'fs' ? { promises } : undefined);
   });
 
   await page.goto(PANEL);
@@ -142,7 +91,7 @@ async function main() {
   await waitDl(0, /^✓ A1$/);
   const file0 = 'C:\\Projeler\\Test\\MyInstants\\[TR] Vine Boom Sound.mp3';
   assert.deepEqual(diskFiles(), ['C:\\Projeler\\Test\\MyInstants\\.myinstants.json', file0]);
-  assert.equal(disk.get(key(file0)).data.slice(0, 4).toString(), 'RIFF');
+  assert.equal(disk.get(file0).slice(0, 4).toString(), 'RIFF');
   assert.deepEqual(premiere.bins(), [['MyInstants', ['[TR] Vine Boom Sound.mp3']]]);
   assert.deepEqual(premiere.clips(0), [[0, 5, 'Röportaj'], [10, 11.5, '[TR] Vine Boom Sound.mp3']]);
   assert.deepEqual(premiere.log, ['createBin', 'importFiles', 'overwriteClip']);
@@ -261,7 +210,7 @@ async function main() {
   console.log('\nAşama 2 uçtan uca testleri geçti. Ekran görüntüleri: ' + OUT);
 
   function resetPremiere(opts) {
-    const p = createPremiere(Object.assign({ onDisk: (x) => disk.has(key(x)) }, opts));
+    const p = createPremiere(Object.assign({ onDisk: (x) => disk.has(x) }, opts));
     return p;
   }
 }

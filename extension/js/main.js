@@ -8,14 +8,18 @@
   const S = window.SiteScraper;
   const HOVER_DELAY_MS = 150;
   const PANEL_STARTED_AT = Date.now();
-  const TABS = ['trending', 'best', 'recent', 'category'];
+  const TABS = ['trending', 'best', 'recent', 'category', 'favorites', 'used'];
+  const LOCAL_TABS = ['favorites', 'used']; // siteden değil, kitaplıktan (library.json) gelen listeler
   const TAB_TITLES = {
     trending: 'Trending',
     best: 'Hall of Fame',
     recent: 'Just Added',
     category: 'Kategoriler',
+    favorites: 'Favoriler',
+    used: 'Son kullanılanlar',
     search: 'Arama',
   };
+  const isLocalTab = (tab) => LOCAL_TABS.includes(tab);
   const ERROR_TEXT = {
     offline: 'İnternet bağlantısı yok gibi görünüyor. Bağlantınızı kontrol edip tekrar deneyin.',
     timeout: 'myinstants.com cevap vermiyor (zaman aşımı). Biraz sonra tekrar deneyin.',
@@ -48,6 +52,7 @@
     rows: $('rows'),
     listEnd: $('listEnd'),
     statusText: $('statusText'),
+    libChip: $('libChip'),
     updateChip: $('updateChip'),
     hostText: $('hostText'),
   };
@@ -365,7 +370,7 @@
     if (!state.notice) return;
     const n = state.notice;
     if (n.lines) {
-      el.notice.append(infoBox(n.title, n.lines, n.actions, n.icon, n.prose));
+      el.notice.append(infoBox(n.title, n.lines, n.actions, n.icon, n.prose, n.tone));
       return;
     }
     el.notice.append(
@@ -389,6 +394,9 @@
     let row = null;
     let item = null;
     let onFail = null;
+    let localSource = null; // favorinin yerel kopyası için adres veren fonksiyon (yoksa null döner)
+    let local = false; // şu an yerel kopya mı çalıyor
+    let seq = 0; // her yeni çalma/durdurma, bekleyen yerel dosya okumasını geçersiz kılar
 
     function release() {
       if (row) row.classList.remove('playing', 'buffering');
@@ -397,6 +405,7 @@
     }
 
     function stop() {
+      seq++;
       clearTimeout(timer);
       timer = null;
       release();
@@ -419,7 +428,23 @@
       item = it;
       r.classList.remove('error');
       r.classList.add('playing', 'buffering');
-      audio.src = it.mp3; // doğrudan sitenin adresi
+      // Favorinin yerel kopyası varsa önce o (site sesi silse de çalışır); yoksa doğrudan sitenin adresi
+      const pending = localSource ? localSource(it) : null;
+      if (!pending) {
+        start(r, it, it.mp3, false);
+        return;
+      }
+      const my = seq;
+      Promise.resolve(pending)
+        .catch(() => null)
+        .then((src) => {
+          if (my === seq && row === r) start(r, it, src || it.mp3, !!src);
+        });
+    }
+
+    function start(r, it, src, isLocal) {
+      local = isLocal;
+      audio.src = src;
       const p = audio.play();
       if (p && p.catch) {
         p.catch((err) => {
@@ -437,6 +462,12 @@
     audio.addEventListener('ended', release);
     audio.addEventListener('error', () => {
       if (row && audio.getAttribute('src')) {
+        if (local) {
+          // Yerel kopya çalınamadı (bozuk olabilir) → sitedeki adres denenir
+          console.warn('[MyInstants] Yerel kopya çalınamadı, siteden deneniyor:', item && item.mp3);
+          start(row, item, item.mp3, false);
+          return;
+        }
         const r = row;
         const it = item;
         release();
@@ -465,6 +496,12 @@
       },
       onFail(fn) {
         onFail = fn;
+      },
+      setLocalSource(fn) {
+        localSource = fn;
+      },
+      get local() {
+        return local;
       },
       get audio() {
         return audio;
@@ -502,6 +539,240 @@
       },
     };
     renderNotice();
+  }
+
+  /* ------------------------------------------------------------------ favoriler + son kullanılanlar */
+
+  // Kayıt localStorage'da DEĞİL, %APPDATA%\BadIdea\MyInstants\library.json'da (js/library.js): CEP'in
+  // depolaması Premiere güncellemesi ya da Temp temizliğiyle silinebilir. Favorinin sesi de oraya kopyalanır.
+  const L = window.Library;
+  const lib = {
+    ready: Promise.resolve(),
+    error: null, // kitaplık yüklenemediyse (ör. Node yok)
+    corrupt: null, // { backup, seen } — açılışta bozuk dosya bulunup kenara alındıysa
+    undo: new Map(), // Favoriler sekmesinde yıldızı kaldırılanların sesi (sekmeden çıkana kadar; geri yıldızlanırsa)
+  };
+
+  function libError(kind, message) {
+    return Object.assign(new Error(message || kind), { kind });
+  }
+
+  function libText(e) {
+    if (e.kind === 'nonode') return 'Panel diske erişemiyor (Node.js kapalı); favoriler kaydedilemiyor.';
+    if (e.code === 'EACCES' || e.code === 'EPERM') return 'Favoriler dosyası kaydedilemedi: klasöre yazma izni yok.';
+    if (e.code === 'ENOSPC') return 'Favoriler dosyası kaydedilemedi: diskte yer yok.';
+    return 'Favoriler dosyası kaydedilemedi.';
+  }
+
+  function startLibrary() {
+    lib.error = null;
+    lib.ready = (async () => {
+      if (!L) throw libError('nonode', 'library.js yüklenmedi');
+      const r = await L.load();
+      // Liste kitaplıktan önce geldiyse yıldızlar boş çizilmiştir: şimdi düzelt
+      el.rows.querySelectorAll('.row').forEach((row) => {
+        if (row._miItem) renderFav(row.querySelector('.fav'), L.isFavorite(row._miItem.id));
+      });
+      if (r.corrupt) {
+        lib.corrupt = { backup: r.backup, seen: false };
+        console.warn('[MyInstants] library.json bozuktu; kenara alındı:', r.backup);
+        renderLibChip();
+      }
+    })().catch((e) => {
+      lib.error = e;
+      console.warn('[MyInstants] Favoriler yüklenemedi:', e);
+    });
+    return lib.ready;
+  }
+
+  const libReady = () => !!L && !lib.error && L.isLoaded();
+  const isFavorite = (item) => libReady() && L.isFavorite(item.id);
+
+  // Alt çubuk uyarısı: açılışta library.json bozuk bulunduysa
+  function renderLibChip() {
+    const c = lib.corrupt;
+    el.libChip.hidden = !c || c.seen;
+    if (el.libChip.hidden) return;
+    const text = document.createElement('span');
+    text.textContent = 'Favoriler dosyası bozuktu';
+    el.libChip.replaceChildren(Icons.svg('triangle-alert', 12), text);
+    el.libChip.title = 'Ayrıntı için tıklayın';
+  }
+
+  function showLibCorrupt() {
+    const c = lib.corrupt;
+    if (!c) return;
+    const ack = () => {
+      c.seen = true;
+      renderLibChip();
+      closeNotice();
+    };
+    state.notice = {
+      title: 'Favoriler dosyası bozuktu',
+      icon: 'triangle-alert',
+      tone: 'warn',
+      prose: true,
+      lines: [
+        'Favoriler ve son kullanılanlar dosyası (library.json) açılışta okunamadı: bozuk ya da yarım yazılmış. Panel boş listeyle devam etti.',
+        c.backup ? 'Bozuk dosya silinmedi, kenara alındı: ' + c.backup : 'Bozuk dosya kenara alınamadı.',
+      ],
+      actions: [{ text: 'Tamam', primary: true, onClick: ack }],
+    };
+    renderNotice();
+  }
+  el.libChip.addEventListener('click', showLibCorrupt);
+
+  function showLibError(e, title) {
+    const detail = [e.code, e.where || (e.kind === 'nonode' ? '' : e.message)].filter(Boolean).join(' · ');
+    state.notice = { err: { kind: 'library', userMessage: libText(e), detail, noRetry: true }, title };
+    renderNotice();
+  }
+
+  // Yıldız tuşu: boş = favori değil, dolu krem = favori
+  function renderFav(btn, on) {
+    btn.classList.toggle('on', on);
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    const label = on ? 'Favorilerden çıkar' : 'Favorilere ekle';
+    btn.title = label;
+    btn.setAttribute('aria-label', label);
+  }
+
+  // Aynı sesin listedeki bütün satırları. Favoriler sekmesinde yıldızı kaldırılan satır silinmez, soluklaşır
+  // (sekmeden çıkınca kaybolur; o zamana kadar yeniden yıldızlanabilir).
+  function syncFav(id, on) {
+    el.rows.querySelectorAll('.row').forEach((r) => {
+      if (!r._miItem || r._miItem.id !== id) return;
+      renderFav(r.querySelector('.fav'), on);
+      if (state.tab === 'favorites') r.classList.toggle('removed', !on);
+    });
+  }
+
+  const favBusy = new Set();
+
+  async function toggleFavorite(item) {
+    if (favBusy.has(item.id)) return;
+    favBusy.add(item.id);
+    const on = !isFavorite(item);
+    syncFav(item.id, on); // hemen görünür; kaydedilemezse geri alınır
+    try {
+      await lib.ready;
+      if (lib.error) throw lib.error;
+      if (on) {
+        await L.addFavorite(item);
+        const bytes = lib.undo.get(item.id);
+        lib.undo.delete(item.id);
+        queueArchive(item, bytes);
+      } else {
+        if (state.tab === 'favorites') {
+          const bytes = await L.readLocal(item.id);
+          if (bytes) lib.undo.set(item.id, bytes); // geri yıldızlanırsa site sesi silmiş olsa da kopya geri gelir
+        }
+        await L.removeFavorite(item.id); // yerel kopya da silinir
+        dropLocalUrl(item.id);
+      }
+    } catch (e) {
+      console.error('[MyInstants] Favori:', e);
+      syncFav(item.id, !on);
+      showLibError(e, on ? 'Favori kaydedilemedi.' : 'Favori kaldırılamadı.');
+    } finally {
+      favBusy.delete(item.id);
+    }
+  }
+
+  // Favorinin sesi arka planda, sırayla yerel arşive kopyalanır (önizlemede indirildiyse tarayıcı önbelleğinden).
+  // Alınamazsa (bağlantı yok, doğrulama…) bir sonraki açılışta yeniden denenir.
+  let archiveChain = Promise.resolve();
+  const archiving = new Set();
+
+  function queueArchive(item, bytes) {
+    if (!libReady() || archiving.has(item.id)) return archiveChain;
+    archiving.add(item.id);
+    archiveChain = archiveChain.then(async () => {
+      try {
+        if (!L.isFavorite(item.id)) return;
+        const buffer = bytes || (await S.fetchAudio(item.mp3, { cache: 'force-cache' })).buffer;
+        await L.storeLocal(item.id, buffer);
+      } catch (e) {
+        console.warn('[MyInstants] Favorinin yerel kopyası alınamadı (yeniden denenecek):', item.mp3, e);
+      } finally {
+        archiving.delete(item.id);
+      }
+    });
+    return archiveChain;
+  }
+
+  async function archiveMissing() {
+    if (!libReady()) return;
+    try {
+      (await L.missingLocal()).forEach((f) => queueArchive(f));
+    } catch (e) {
+      console.warn('[MyInstants] Yerel kopyalar denetlenemedi:', e);
+    }
+  }
+
+  // Favorinin yerel kopyası → blob: adresi (önizleme için; en fazla 40 tanesi bellekte tutulur)
+  const AUDIO_MIME = { mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', opus: 'audio/ogg', m4a: 'audio/mp4', aac: 'audio/aac', webm: 'audio/webm' };
+  const localUrls = new Map();
+
+  const hasLocal = (item) => libReady() && !!L.localPath(item.id);
+
+  async function localAudioUrl(item) {
+    const cached = localUrls.get(item.id);
+    if (cached) {
+      localUrls.delete(item.id); // en son kullanılan sona
+      localUrls.set(item.id, cached);
+      return cached;
+    }
+    const p = L.localPath(item.id);
+    const bytes = p && (await L.readLocal(item.id));
+    if (!bytes) return null; // kopya silinmiş: siteden çalınır
+    const ext = ((/\.([a-z0-9]+)$/i.exec(p) || [])[1] || '').toLowerCase();
+    const url = URL.createObjectURL(new Blob([bytes], { type: AUDIO_MIME[ext] || 'audio/mpeg' }));
+    localUrls.set(item.id, url);
+    while (localUrls.size > 40) {
+      const [id, old] = localUrls.entries().next().value;
+      localUrls.delete(id);
+      URL.revokeObjectURL(old);
+    }
+    return url;
+  }
+
+  function dropLocalUrl(id) {
+    const url = localUrls.get(id);
+    if (!url) return;
+    localUrls.delete(id);
+    URL.revokeObjectURL(url);
+  }
+
+  preview.setLocalSource((item) => (hasLocal(item) ? localAudioUrl(item) : null));
+
+  // Timeline'a başarıyla konan ses "Son kullanılanlar"a yazılır (önizleme sayılmaz; kopya tutulmaz)
+  function rememberUsed(item) {
+    if (!L) return;
+    lib.ready
+      .then(() => libReady() && L.addRecent(item))
+      .catch((e) => console.warn('[MyInstants] Son kullanılanlara yazılamadı:', e));
+  }
+
+  async function libDiagLines() {
+    if (!L) return ['Favoriler: library.js yüklenmedi'];
+    await lib.ready;
+    let file = '';
+    try {
+      file = L.paths().file;
+    } catch (e) {
+      file = '?';
+    }
+    if (lib.error) return ['Favoriler dosyası: okunamadı — ' + libText(lib.error)];
+    const favs = L.favorites();
+    const missing = await L.missingLocal().catch(() => favs);
+    const lines = [
+      'Favoriler dosyası: ' + file,
+      `Favoriler: ${favs.length} (yerel kopya: ${favs.length - missing.length})`,
+      `Son kullanılanlar: ${L.recent().length}`,
+    ];
+    if (lib.corrupt) lines.push('Açılışta bozuk dosya kenara alındı: ' + (lib.corrupt.backup || 'alınamadı'));
+    return lines;
   }
 
   /* ------------------------------------------------------------------ İndir → import → timeline */
@@ -608,6 +879,7 @@
     try {
       const r = await downloadAndPlace(item);
       setDl(btn, 'done', 'A' + r.track);
+      rememberUsed(item);
       if (state.notice && state.notice.jobItem === item) closeNotice();
       flash(`“${item.name}” → A${r.track}` + (r.addedTrack ? ' (yeni track)' : ''));
     } catch (err) {
@@ -639,10 +911,12 @@
       if (target.exists) {
         seconds = await measureSeconds(await LocalFiles.readFile(target.path));
       } else {
-        const audio = await S.fetchAudio(item.mp3);
+        // Favorinin yerel kopyası varsa siteye gidilmez (site sesi silse de çalışır)
+        const local = hasLocal(item) ? await L.readLocal(item.id) : null;
+        const buffer = local || (await S.fetchAudio(item.mp3)).buffer;
         await LocalFiles.ensureDir(ctx.folder);
-        await LocalFiles.writeFileAtomic(target.path, audio.buffer);
-        seconds = await measureSeconds(audio.buffer);
+        await LocalFiles.writeFileAtomic(target.path, buffer);
+        seconds = await measureSeconds(buffer);
       }
     } catch (e) {
       if (e.kind && JOB_TEXT[e.kind]) throw jobError(e.kind, { detail: e.where || e.message });
@@ -671,9 +945,10 @@
 
   // Bilgi kutusu. actions verilmezse yalnızca "Kapat"; [] ise hiç tuş yok (ör. işlem sürüyor).
   // prose: true → satırlar düz metin (ör. değişiklik notu); değilse eş aralıklı teşhis kutusu
-  function infoBox(title, lines, actions, iconName, prose) {
+  // tone: 'warn' → ikon tehlike renginde (ör. bozuk kitaplık dosyası)
+  function infoBox(title, lines, actions, iconName, prose, tone) {
     const box = document.createElement('div');
-    box.className = 'msg info';
+    box.className = 'msg info' + (tone ? ' ' + tone : '');
     box.append(head(iconName || 'info', title));
     if (lines && lines.length && prose) {
       const notes = document.createElement('div');
@@ -711,6 +986,7 @@
     }
     const unit = store.get('timeUnit.' + (hostVersion || 'bilinmiyor'), '');
     lines.push('Zaman birimi (bu sürüm): ' + (unit === 'ticks' ? 'tick (metin)' : unit === 'seconds' ? 'saniye' : 'henüz denenmedi'));
+    lines.push(...(await libDiagLines()));
     lines.push(...(await updateDiagLines()));
     state.notice = { title: 'Teşhis', lines };
     renderNotice();
@@ -1009,6 +1285,16 @@
     name.textContent = item.name;
     name.title = item.name;
 
+    const fav = document.createElement('button');
+    fav.type = 'button';
+    fav.className = 'fav';
+    fav.append(Icons.svg('star', 14));
+    renderFav(fav, isFavorite(item));
+    fav.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleFavorite(item);
+    });
+
     const dl = document.createElement('button');
     dl.type = 'button';
     dl.className = 'dl';
@@ -1019,7 +1305,8 @@
       queueDownload(item, dl);
     });
 
-    row.append(lead, name, dl);
+    row._miItem = item;
+    row.append(lead, name, fav, dl);
     row.addEventListener('mouseenter', () => preview.hoverStart(row, item));
     row.addEventListener('mouseleave', () => preview.hoverEnd(row));
     // Önizleme yalnızca hover'a bağlı kalmasın: tıklama ve Enter/Boşluk baştan çalar, Esc durdurur.
@@ -1054,9 +1341,12 @@
     }
 
     if (state.count === 0) {
-      end.append(
-        line(state.tab === 'search' ? `“${state.query}” için sonuç bulunamadı.` : 'Bu listede ses yok.', 'msg')
-      );
+      const empty = {
+        search: `“${state.query}” için sonuç bulunamadı.`,
+        favorites: 'Henüz favori yok. Bir sesin yanındaki yıldıza tıklayın.',
+        used: 'Henüz kullanılan ses yok. İndir ile timeline’a koyduğunuz sesler burada görünür.',
+      };
+      end.append(line(empty[state.tab] || 'Bu listede ses yok.', 'msg'));
       return;
     }
 
@@ -1113,6 +1403,7 @@
 
     if (reset) {
       preview.stop();
+      lib.undo.clear();
       state.page = 0;
       state.count = 0;
       state.seen = new Set();
@@ -1126,6 +1417,20 @@
     renderStatus();
 
     try {
+      // Favoriler / Son kullanılanlar: siteye gidilmez, hepsi birden (sayfalama yok)
+      if (isLocalTab(state.tab)) {
+        if (lib.error) startLibrary(); // önceki yükleme başarısızdı: bir kez daha dene
+        await lib.ready;
+        if (token !== state.token) return;
+        if (lib.error) throw Object.assign(new Error(lib.error.message), { kind: 'library', userMessage: libText(lib.error) });
+        const items = state.tab === 'favorites' ? L.favorites() : L.recent();
+        el.rows.append(...items.map(makeRow));
+        state.page = 1;
+        state.count = items.length;
+        state.hasMore = false;
+        return;
+      }
+
       if (state.tab === 'category') await ensureCategories();
       if (token !== state.token) return;
 
@@ -1158,12 +1463,32 @@
 
   /* ------------------------------------------------------------------ üst kontroller */
 
+  // Dar panelde sekmeler yatay kayar: devamı olan kenar soluklaşır, fare tekerleği de yatay kaydırır
+  function updateTabEdges() {
+    const t = el.tabs;
+    t.classList.toggle('more-left', t.scrollLeft > 1);
+    t.classList.toggle('more-right', t.scrollLeft + t.clientWidth < t.scrollWidth - 1);
+  }
+  el.tabs.addEventListener('scroll', updateTabEdges, { passive: true });
+  window.addEventListener('resize', updateTabEdges);
+  el.tabs.addEventListener(
+    'wheel',
+    (e) => {
+      const t = el.tabs;
+      if (t.scrollWidth <= t.clientWidth || Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+      e.preventDefault();
+      t.scrollLeft += e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY; // bazı fareler satır cinsinden verir
+    },
+    { passive: false }
+  );
+
   function updateChrome() {
     el.tabs.querySelectorAll('button').forEach((b) => {
       b.classList.toggle('active', b.dataset.tab === state.tab);
       b.setAttribute('aria-selected', b.dataset.tab === state.tab ? 'true' : 'false');
       if (b.dataset.tab === state.tab && b.scrollIntoView) b.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     });
+    updateTabEdges();
 
     const regional = S.isRegional(state.tab);
     el.region.classList.toggle('disabled', !regional);
@@ -1254,6 +1579,7 @@
     renderNotice();
     pingHost();
     loadList(true);
+    if (state.tab === 'favorites') archiveMissing(); // yerel kopyası alınamamış favoriler yeniden denenir
   });
 
   function setVolume(v) {
@@ -1275,11 +1601,13 @@
   /* ------------------------------------------------------------------ başlangıç */
 
   Icons.hydrate();
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(updateTabEdges); // Geist yüklenince sekme genişlikleri değişir
   applyTheme();
   if (cs) cs.addEventListener(CSInterface.THEME_COLOR_CHANGED_EVENT, applyTheme);
   setVolume(savedVolume);
   updateChrome();
   pingHost();
+  startLibrary().then(() => setTimeout(archiveMissing, 1500)); // eksik yerel kopyalar arka planda
   loadList(true);
   setupFlyoutMenu();
   initVersion().then(() => {
@@ -1288,5 +1616,18 @@
   });
 
   // Hata ayıklama ve testler için
-  window.MyInstantsPanel = { state, preview, loadList, verify, runDiagnostics, checkForUpdates, update, setDl, showUpdateOffer, renderUpdateChip };
+  window.MyInstantsPanel = {
+    state,
+    preview,
+    loadList,
+    verify,
+    runDiagnostics,
+    checkForUpdates,
+    update,
+    setDl,
+    showUpdateOffer,
+    renderUpdateChip,
+    lib,
+    archiveIdle: () => archiveChain,
+  };
 })();

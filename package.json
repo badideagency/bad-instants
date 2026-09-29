@@ -10,7 +10,8 @@
     "release": "node tools/release.js",
     "build:release": "node tools/build-release.js",
     "test:update": "node tests/update-e2e.js",
-    "test:design": "node tests/design-shots.js"
+    "test:design": "node tests/design-shots.js",
+    "test:library": "node tests/library-e2e.js"
   },
   "devDependencies": {
     "acorn": "^8.18.0",

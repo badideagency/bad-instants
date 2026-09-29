@@ -27,12 +27,17 @@
     </label>
   </div>
 
+  <div class="tabbar">
   <nav id="tabs" class="tabs" role="tablist" aria-label="Listeler">
     <button type="button" role="tab" data-tab="trending">Trending</button>
     <button type="button" role="tab" data-tab="best">Hall of Fame</button>
     <button type="button" role="tab" data-tab="recent">Just Added</button>
     <button type="button" role="tab" data-tab="category">Kategoriler</button>
+    <span class="tab-sep" aria-hidden="true"></span>
+    <button type="button" role="tab" data-tab="favorites">Favoriler</button>
+    <button type="button" role="tab" data-tab="used">Son kullanılanlar</button>
   </nav>
+  </div>
 
   <div id="categoryBar" class="subbar" hidden>
     <div class="select">
@@ -54,6 +59,7 @@
 
   <footer class="status">
     <span id="statusText"></span>
+    <button id="libChip" type="button" class="lib-chip" hidden></button>
     <button id="updateChip" type="button" class="update-chip" hidden></button>
     <button id="hostText" type="button" class="host"></button>
   </footer>
@@ -65,6 +71,7 @@
   <script src="js/localFiles.js"></script>
   <script src="js/vendor/fflate.js"></script>
   <script src="js/updater.js"></script>
+  <script src="js/library.js"></script>
   <script src="js/main.js"></script>
 </body>
 </html>

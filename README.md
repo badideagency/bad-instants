@@ -23,6 +23,23 @@ Bin var + dosya daha önce import edilmiş → 1 adım; dosya yeni → 2; projed
 
 Teşhis: alt çubuktaki yeşil "Premiere … ✓" yazısına ya da panel menüsünde (≡) **Teşhis**'e tıklayın.
 
+## Favoriler ve Son kullanılanlar
+
+- **Yıldız:** Her sesin yanındaki yıldıza tıklayınca ses **Favoriler** sekmesine eklenir (son eklenen üstte, sınır yok).
+  Favoriler sekmesinde yıldızı kaldırılan ses soluklaşır; sekmeden çıkana kadar geri yıldızlanabilir.
+- **Son kullanılanlar:** İndir ile timeline'a başarıyla konan son 50 ses (en yeni üstte). Önizleme sayılmaz.
+- Bu iki sekmede bölge seçici pasiftir ve "Daha fazla" yoktur (hepsi birden gösterilir).
+- **Kayıt yeri:** `%APPDATA%\BadIdea\MyInstants\library.json` (localStorage DEĞİL: CEP'in depolaması `%TEMP%\cep_cache`
+  altında ve Premiere sürümüne bağlı; Premiere güncellemesi ya da Temp temizliği silebilir). Dosya Node ile önce geçici
+  dosyaya yazılır, sonra asıl adına taşınır; yarım yazma olmaz.
+- **Favori = yerel arşiv:** Yıldızlanan sesin kopyası arka planda `%APPDATA%\BadIdea\MyInstants\library\` altına alınır
+  (önizlemede indirildiyse tarayıcının önbelleğinden). Önizleme ve İndir önce bu kopyayı kullanır; site sesi silse de
+  favori çalışır. Kopya alınamazsa (bağlantı yok, doğrulama…) bir sonraki açılışta ya da Favoriler'de Yenile'ye
+  basınca yeniden denenir. Yıldız kaldırılınca kopya silinir. Son kullanılanlar için kopya tutulmaz.
+- **Dosya bozuksa:** Panel çökmez; bozuk dosya `library.json.bak` olarak kenara alınır (içeriği korunur), boş listeyle
+  devam edilir, alt çubukta "Favoriler dosyası bozuktu" uyarısı çıkar (tıklayınca yedeğin yeri görünür).
+- Bölge ve ses seviyesi gibi küçük ayarlar localStorage'da kalır.
+
 ## Güncelleme (panelin içinden)
 
 - Panel açılışta ve 6 saatte bir GitHub'daki son sürüme bakar (token yok; depo public). Yeni sürüm varsa
@@ -74,6 +91,7 @@ extension/            ← Premiere'e bağlanan panel klasörü
   fonts/              ← Geist değişken yazı tipi (SIL OFL)
   js/siteScraper.js   ← myinstants.com'u okuyan TEK dosya (site değişirse yalnız burası düzeltilir)
   js/localFiles.js    ← diske yazma, dosya adı kuralları (Node)
+  js/library.js       ← Favoriler / Son kullanılanlar kaydı ve favorilerin yerel ses arşivi (%APPDATA%)
   js/main.js          ← arayüz davranışı, İndir iş sırası, güncelleme / panel menüsü
   js/updater.js       ← panel içi güncelleme (denetim, doğrulama, yedek, kurulum, geri dönüş)
   js/vendor/fflate.js ← saf JS ZIP kütüphanesi (MIT)
@@ -107,7 +125,8 @@ tests/                ← geliştirme testleri (panelin çalışması için gere
 4. Premiere'i yeniden başlatın → **Window > Extensions > MyInstants**.
 
 Kodu güncelledikten sonra paneli kapatıp açmanız yeterli; olmazsa Premiere'i yeniden başlatın.
-Kaldırmak için `uninstall.bat` (proje klasörüne dokunmaz).
+Kaldırmak için `uninstall.bat` (proje klasörüne ve favorilere dokunmaz; yeniden kurunca favoriler yerindedir).
+Favorileri ve güncelleme yedeklerini de silmek isterseniz `%APPDATA%\BadIdea\MyInstants` klasörünü silin.
 
 ## Site kontrol aracı (yalnız teşhis içindir)
 
@@ -135,11 +154,13 @@ Panel Premiere'de açıkken Chrome'da `http://localhost:8871` → panelin Consol
 
 ```
 npm install
-npm test          # siteScraper, localFiles ve host.jsx (sahte Premiere içinde; ES3 uyumu dahil)
+npm test          # siteScraper, localFiles, library, updater, theme ve host.jsx (sahte Premiere içinde; ES3 uyumu dahil)
 npm run test:ui   # paneli manifest'teki CEF ayarlarıyla headless Chromium'da açar; www.myinstants.com adını
                   # Cloudflare benzeri sahte bir siteye (tests/fake-site.js) yönlendirip gerçek fetch yolunu,
                   # Doğrula penceresini, çerez paylaşımını ve yeniden açılışta çerezin kalmasını dener
 npm run test:stage2 # İndir → diske yaz → import → timeline akışı (sahte site + sahte Premiere + sahte disk)
 npm run test:update # panel içi güncelleme: sahte GitHub, gerçek geçici kurulum klasörü, menü, geri dönüş
 npm run test:design # tasarım denetimi: bütün durumların ekran görüntüsü, Geist + Türkçe harfler, kontrast, dar panel
+npm run test:library # favoriler: bozuk library.json ile açılış, yıldız + yerel kopya, site 404 iken yerelden çalma,
+                     # yeniden kurulumdan sonra favorilerin kalması, Son kullanılanlar
 ```

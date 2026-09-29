@@ -189,9 +189,11 @@
   }
 
   // Bir ses dosyasını indirir → { buffer: ArrayBuffer, type, size, url }. (Diske yazma Node'un işi.)
-  function fetchAudio(url) {
+  // opts.cache: 'force-cache' → önizlemede zaten indirilmişse tarayıcının önbelleğinden alınır (favori arşivi)
+  function fetchAudio(url, opts) {
+    const extra = opts && opts.cache ? { cache: opts.cache } : undefined;
     return withTimeout(url, timeoutMs * 2, async (signal) => {
-      const res = await doFetch(url, signal);
+      const res = await doFetch(url, signal, extra);
       const type = String(res.headers.get('content-type') || '').toLowerCase();
       if (!res.ok || type.includes('text/html')) {
         const body = await res.text().catch(() => '');
