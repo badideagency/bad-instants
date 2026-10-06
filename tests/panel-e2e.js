@@ -1,9 +1,9 @@
 // Paneli headless Chromium'da, manifest'teki CEF ayarlarıyla açar ve GERÇEK fetch yolunu dener.
 // "www.myinstants.com" adı yerel sahte siteye (tests/fake-site.js) yönlendirilir; bu site
 // Cloudflare benzeri doğrulama / engel sayfaları döndürebilir.
-// Denenenler: listeler, önizleme, bölge/sekme/arama, doğrulama sayfasını tanıma, Doğrula penceresi
-// (window.open) + çerezin panelle paylaşılması + pencere kapanınca otomatik tekrar, engel mesajı,
-// tarayıcı kapatılıp açılınca çerezin kalıp kalmadığı, CORS teşhisi, Türkçe hata mesajları.
+// Denenenler: listeler, önizleme, bölge/sekme/arama, doğrulama sayfasını tanıma (panel doğrulama sayfası
+// AÇMAZ, pencere de açmaz; dürüst mesaj + Tekrar dene), site açılınca Tekrar dene ile dönüş, önizlemede
+// doğrulama uyarısı, kesin engel mesajı, CORS teşhisi, Türkçe hata mesajları.
 // Çalıştırma: npm run test:ui   (ekran görüntüleri test-output/ klasörüne yazılır)
 'use strict';
 
@@ -103,110 +103,65 @@ async function main() {
   await page.waitForFunction(() => /Trending · Global \(US\) · 4 ses/.test(document.querySelector('#statusText').textContent));
   step('Bölge (US), Daha fazla, Just Added (bölge pasif), Kategoriler, Arama gerçek adreslerle çalıştı');
 
-  /* ---------- 5) Doğrulama sayfası tanınır, ayrıştırılmaz ---------- */
+  /* ---------- 5) Doğrulama sayfası tanınır, ayrıştırılmaz; panel pencere / doğrulama sayfası açmaz ---------- */
+  await page.evaluate(() => {
+    window.__opens = 0;
+    window.open = () => {
+      window.__opens += 1;
+      return null;
+    };
+  });
   site.state.mode = 'challenge';
   await page.locator('#refreshBtn').click();
   await page.waitForFunction(() => document.querySelector('#listEnd .challenge'));
   assert.equal(await rows().count(), 0);
-  assert.match(await listEnd().textContent(), /Site doğrulama istiyor\./);
+  const box = await listEnd().textContent();
+  assert.match(box, /Site şu an doğrulama istiyor\./);
+  assert.match(box, /panel bu doğrulamayı gösteremiyor/);
+  assert.match(box, /HTTP 403 · doğrulama sayfası/);
+  assert.deepEqual(await listEnd().locator('button').allTextContents(), ['Tekrar dene']); // Doğrula tuşu yok
   await shot('e2e-1-challenge.png');
-  step('Doğrulama sayfası tanındı: "Site doğrulama istiyor" + Doğrula, liste ayrıştırılmadı');
+  step('Doğrulama sayfası tanındı: dürüst mesaj + yalnız "Tekrar dene"; liste ayrıştırılmadı');
 
-  /* ---------- 6) Doğrula → window.open penceresi → doğrula → kapat → otomatik tekrar ---------- */
-  const popupP = ctx.waitForEvent('page');
-  await page.locator('#listEnd button.primary').click();
-  const popup = await popupP;
-  await popup.waitForLoadState();
-  assert.equal(popup.url(), SITE + '/en/trending/us/');
-  assert.equal(await popup.title(), 'Just a moment...');
-  await page.waitForFunction(() => /Doğrulama penceresi açık/.test(document.querySelector('#listEnd').textContent));
-  await shot('e2e-2-window-open.png');
-  await popup.locator('#cf-verify').click(); // kullanıcı doğrulamayı yapar
-  await popup.waitForURL(SITE + '/en/trending/us/');
-  assert.ok(site.state.tokens.size === 1);
-  await popup.close(); // kullanıcı pencereyi kapatır
+  /* ---------- 6) Doğrulama sürerken Tekrar dene → yine aynı mesaj; site açılınca liste geri gelir ---------- */
+  await listEnd().locator('button.primary').click();
+  await page.waitForFunction(() => document.querySelector('#listEnd .challenge'));
+  site.state.mode = 'open';
+  await listEnd().locator('button.primary').click();
   await page.waitForFunction(() => document.querySelectorAll('#rows .row').length === 4);
-  const retried = site.last(/^\/en\/trending\/us\/$/);
-  assert.equal(retried.hasClearance, true); // pencerede alınan çerez panelin isteğine eklendi
-  assert.equal(retried.secFetchMode, 'cors');
-  assert.match(await page.locator('#statusText').textContent(), /Doğrulama tamam/);
-  assert.ok(Number(await page.evaluate(() => localStorage.getItem('mi.verifiedAt'))) > 0);
-  step('Doğrula: window.open penceresi açıldı; kapanınca istek otomatik tekrarlandı, çerez panelle ortak');
+  assert.match(await page.locator('#statusText').textContent(), /Site yeniden açık/);
+  assert.equal(page.url(), PANEL); // panel kendi sayfasında kaldı
+  step('Site açılınca "Tekrar dene" listeyi getirdi; durum çubuğu "Site yeniden açık" dedi');
 
-  /* ---------- 7) Önizleme doğrulama sonrası çerezle çalar ---------- */
-  await rows().nth(1).hover();
-  await page.waitForFunction(() => {
-    const r = document.querySelector('#rows .row.playing');
-    return r && !r.classList.contains('buffering');
-  });
-  assert.equal(site.last(/^\/media\/sounds\/telefonum-calcaksa\.mp3$/).hasClearance, true);
-  await page.mouse.move(5, 5);
-  step('Önizleme doğrulama çereziyle çaldı');
-
-  /* ---------- 8) Önizleme doğrulamaya takılırsa üstte uyarı + Doğrula ---------- */
-  site.state.tokens.clear(); // çerez geçersiz oldu
+  /* ---------- 7) Önizleme doğrulamaya takılırsa üstte uyarı; site açılınca Tekrar dene ---------- */
+  site.state.mode = 'challenge';
   await rows().nth(2).hover();
   await page.waitForFunction(() => !document.querySelector('#notice').hidden);
   assert.match(await page.locator('#notice').textContent(), /Ses çalınamadı: site doğrulama istiyor\./);
+  assert.deepEqual(await page.locator('#notice button').allTextContents(), ['Kapat', 'Tekrar dene']);
   await page.mouse.move(5, 5);
   await shot('e2e-3-audio-challenge.png');
-  const popup2P = ctx.waitForEvent('page');
+  site.state.mode = 'open';
   await page.locator('#notice button.primary').click();
-  const popup2 = await popup2P;
-  await popup2.locator('#cf-verify').click();
-  await popup2.waitForLoadState();
-  await popup2.close();
-  await page.waitForFunction(() => document.querySelector('#notice').hidden);
+  await page.waitForFunction(() => document.querySelector('#notice').hidden && !document.querySelector('#rows .row.error'));
   await rows().nth(2).hover();
   await page.waitForFunction(() => {
     const r = document.querySelector('#rows .row.playing');
     return r && !r.classList.contains('buffering');
   });
   await page.mouse.move(5, 5);
-  step('Önizleme doğrulamaya takıldı → üstte uyarı + Doğrula → pencere kapanınca uyarı kalktı, ses çaldı');
+  step('Önizleme doğrulamaya takıldı → üstte uyarı (Kapat / Tekrar dene) → site açılınca uyarı kalktı, ses çaldı');
 
-  /* ---------- 9) "Doğrulamayı bitirdim" (pencere kapanışı fark edilmezse) + başarısız doğrulama ---------- */
-  site.state.tokens.clear();
-  await page.locator('#refreshBtn').click();
-  await page.waitForFunction(() => document.querySelector('#listEnd .challenge'));
-  const popup3P = ctx.waitForEvent('page');
-  await page.locator('#listEnd button.primary').click();
-  const popup3 = await popup3P;
-  await page.locator('#listEnd button', { hasText: 'Doğrulamayı bitirdim' }).click(); // doğrulamadan
-  await page.waitForFunction(() => /hâlâ doğrulama istiyor/.test(document.querySelector('#listEnd').textContent));
-  assert.equal(popup3.isClosed(), true);
-  step('"Doğrulamayı bitirdim" pencereyi kapatıp tekrar denedi; doğrulanmadığı için uyarı gösterildi');
-
-  /* ---------- 10) Kesin engel: doğrulama işe yaramazsa açıkça söylenir ---------- */
+  /* ---------- 8) Kesin engel ---------- */
   site.state.mode = 'block';
   await page.locator('#refreshBtn').click();
-  await page.waitForFunction(() => /Site doğrulama istiyor/.test(document.querySelector('#listEnd').textContent));
-  const popup4P = ctx.waitForEvent('page');
-  await page.locator('#listEnd button.primary').click();
-  const popup4 = await popup4P;
-  await popup4.waitForLoadState();
-  assert.equal(await popup4.title(), 'Attention Required! | Cloudflare');
-  await popup4.close();
-  await page.waitForFunction(() => /hâlâ engelliyor/.test(document.querySelector('#listEnd').textContent));
+  await page.waitForFunction(() => /bu bağlantıyı engelliyor/.test(document.querySelector('#listEnd').textContent));
+  assert.match(await listEnd().textContent(), /HTTP 403 · engel sayfası/);
   await shot('e2e-4-hard-block.png');
-  step('Kesin engel ("Sorry, you have been blocked"): doğrulamadan sonra "hâlâ engelliyor" mesajı');
+  assert.equal(await page.evaluate(() => window.__opens), 0); // hiçbir adımda pencere açılmaya çalışılmadı
+  step('Kesin engel ("Sorry, you have been blocked") ayrı mesajla söylendi; hiçbir adımda pencere açılmadı');
 
-  /* ---------- 11) window.open açılmazsa ---------- */
-  site.state.mode = 'challenge';
-  await page.evaluate(() => {
-    window.__realOpen = window.open;
-    window.open = () => null;
-  });
-  await page.locator('#refreshBtn').click();
-  await page.waitForFunction(() => document.querySelector('#listEnd .challenge'));
-  await page.locator('#listEnd button.primary').click();
-  await page.waitForFunction(() => /Doğrulama penceresi açılamadı/.test(document.querySelector('#listEnd').textContent));
-  await page.evaluate(() => {
-    window.open = window.__realOpen;
-  });
-  step('window.open açılmazsa "Doğrulama penceresi açılamadı" deniyor');
-
-  /* ---------- 12) Ağ hataları: çevrimdışı, zaman aşımı ---------- */
+  /* ---------- 9) Ağ hataları: çevrimdışı, zaman aşımı ---------- */
   await ctx.setOffline(true);
   await page.locator('#refreshBtn').click();
   await page.waitForFunction(() => /İnternet bağlantısı yok/.test(document.querySelector('#listEnd').textContent));
@@ -218,38 +173,9 @@ async function main() {
   await page.evaluate(() => SiteScraper._setTimeout(15000));
   step('Çevrimdışı ve zaman aşımı mesajları Türkçe');
 
-  /* ---------- 13) Kalıcı çerez: tarayıcı kapatılıp açılınca doğrulama korunuyor mu? ---------- */
-  site.state.mode = 'challenge';
-  site.state.cookieMode = 'persistent';
-  site.state.tokens.clear();
-  await verifyViaPanel();
-  await ctx.close(); // "Premiere kapandı"
-  ctx = await launch(cef);
-  page = await openPanel(ctx);
-  await page.locator('#rows .row').first().waitFor();
-  assert.equal(site.last(/^\/en\/trending\/us\/$/).hasClearance, true);
-  await page.waitForFunction(() => /Doğrulama istenmedi/.test(document.querySelector('#statusText').textContent));
-  await shot('e2e-5-restart-kept.png');
-  step('Kalıcı çerez: yeniden açılışta doğrulama istenmedi, durum çubuğu bunu bildirdi');
-
-  /* ---------- 14) Oturum çerezi kaybolursa panel bunu açıkça söylüyor ---------- */
-  // (Chrome oturum çerezlerini kapanışta siler; CEP'te --persist-session-cookies bunu önlemeli.
-  //  Burada amaç, çerez kaybolduğunda panelin teşhis mesajını doğrulamak.)
-  site.state.cookieMode = 'session';
-  site.state.tokens.clear();
-  await page.locator('#refreshBtn').click();
-  await page.waitForFunction(() => document.querySelector('#listEnd .challenge'));
-  await verifyViaPanel();
-  await ctx.close();
-  ctx = await launch(cef);
-  page = await openPanel(ctx);
-  await page.waitForFunction(() => document.querySelector('#listEnd .challenge'));
-  assert.match(await page.locator('#listEnd').textContent(), /yeniden açılınca doğrulama korunmamış/);
-  await shot('e2e-6-restart-lost.png');
-  step('Çerez kaybolunca: "Panel/Premiere yeniden açılınca doğrulama korunmamış" notu gösterildi');
   await ctx.close();
 
-  /* ---------- 15) --disable-web-security olmadan: CORS teşhisi ---------- */
+  /* ---------- 10) --disable-web-security olmadan: CORS teşhisi ---------- */
   site.state.mode = 'open';
   ctx = await launch(cef.filter((a) => a !== '--disable-web-security'));
   page = await openPanel(ctx);
@@ -269,19 +195,6 @@ async function main() {
     p.on('close', () => assert.deepEqual(errors, [], 'sayfa hatası: ' + errors.join(' | ')));
     await p.goto(PANEL);
     return p;
-  }
-
-  // Panelde Doğrula → pencerede doğrula → pencereyi kapat → liste gelsin
-  async function verifyViaPanel() {
-    await page.locator('#refreshBtn').click();
-    await page.waitForFunction(() => document.querySelector('#listEnd .challenge'));
-    const pp = ctx.waitForEvent('page');
-    await page.locator('#listEnd button.primary').click();
-    const w = await pp;
-    await w.locator('#cf-verify').click();
-    await w.waitForLoadState();
-    await w.close();
-    await page.waitForFunction(() => document.querySelectorAll('#rows .row').length === 4);
   }
 }
 

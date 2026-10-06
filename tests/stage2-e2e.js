@@ -130,21 +130,17 @@ async function main() {
   premiere.project.activeSequence = savedSeq;
   step('Aktif sequence yokken: "Açık bir sequence yok" uyarısı, hiçbir şey indirilmedi');
 
-  /* 5) İndirme sırasında site doğrulama isterse: Doğrula → pencere kapanınca indirme tekrarlanır */
+  /* 5) İndirme sırasında site doğrulama isterse: dürüst mesaj (pencere yok); site açılınca Tekrar dene indirir */
   site.state.mode = 'challenge';
   site.state.tokens.clear();
   await notice().locator('button', { hasText: 'Tekrar dene' }).click();
   await page.waitForFunction(() => /İndirmek için site doğrulama istiyor/.test(document.querySelector('#notice').textContent));
-  const popupP = ctx.waitForEvent('page');
-  await notice().locator('button.primary').click();
-  const popup = await popupP;
-  await popup.locator('#cf-verify').click();
-  await popup.waitForLoadState();
-  await popup.close();
+  assert.deepEqual(await notice().locator('button').allTextContents(), ['Kapat', 'Tekrar dene']);
+  site.state.mode = 'open';
+  await notice().locator('button', { hasText: 'Tekrar dene' }).click();
   await waitDl(3, /^✓ A\d$/);
   assert.equal(await notice().isHidden(), true);
-  site.state.mode = 'open';
-  step('İndirmede doğrulama: Doğrula → pencere kapanınca indirme kendiliğinden tekrarlandı ve yerleşti');
+  step('İndirmede doğrulama: "İndirmek için site doğrulama istiyor" (pencere yok); site açılınca Tekrar dene indirip yerleştirdi');
 
   // Yeni sesler için 2. sayfa
   await page.locator('.more-btn').click();

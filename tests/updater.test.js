@@ -113,6 +113,7 @@ test('paket: build → ZIP → açma (üst klasörlü)', () => {
   const files = U.extractPackage(fs.readFileSync(pkg.zipPath), '9.9.9', REPO_EXT);
   assert.equal(files.size, pkg.info.files);
   assert.ok(files.has('CSXS/manifest.xml') && files.has('js/updater.js') && files.has('js/vendor/fflate.js'));
+  assert.ok(fs.existsSync(path.join(ext, '.debug')) && !files.has('.debug')); // geliştirici portu pakete girmez
   // aynı içerik → aynı ZIP (sabit tarih)
   const again = build('v9.9.9', { extDir: ext, outDir: path.join(out, 'dist2') });
   assert.equal(again.info.sha256, pkg.info.sha256);
@@ -190,10 +191,14 @@ test('kurulum (kopya): yedek alınır, dosyalar değişir, manifest sadece sür�
 
   const inst = await U.resolveInstall(ext);
   assert.deepEqual([inst.linked, inst.gitCheckout], [false, false]);
+  assert.ok(fs.existsSync(path.join(ext, '.debug')));
   const r = await U.install(inst.realDir, files, '0.3.1');
   assert.deepEqual([r.from, r.to, r.manifestChanged], ['0.3.0', '0.3.1', false]);
-  assert.deepEqual(snapshot(ext), snapshot(newExt));
+  const expected = snapshot(newExt);
+  delete expected['.debug'];
+  assert.deepEqual(snapshot(ext), expected);
   assert.ok(!fs.existsSync(path.join(ext, 'eski-dosya.txt')));
+  assert.ok(!fs.existsSync(path.join(ext, '.debug'))); // güncelleme eski geliştirici portu dosyasını da kaldırır
   // yedek CEP klasörünün DIŞINDA ve eski hâlin aynısı
   assert.ok(r.backupDir.startsWith(path.join(out, 'AppData', 'BadIdea', 'MyInstants', 'backup')));
   assert.deepEqual(snapshot(path.join(r.backupDir, 'files')), before);

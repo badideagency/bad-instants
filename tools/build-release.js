@@ -11,7 +11,10 @@ const fflate = require('../extension/js/vendor/fflate.js');
 
 const ROOT = path.join(__dirname, '..');
 const BUNDLE = 'com.badidea.myinstants';
-const SKIP = /^(\.DS_Store|Thumbs\.db|desktop\.ini)$/i;
+// .debug yayınlanan pakete girmez: Premiere'in geliştirici modu açıkken bu bilgisayardaki başka programların paneli
+// (dosya yazabilen) dışarıdan yönetebileceği bir kapı açar. Güncelleme bu dosyayı kurulumdan da kaldırır.
+// Hata ayıklamak gerekirse depodaki extension/.debug elle kopyalanır.
+const SKIP = /^(\.DS_Store|Thumbs\.db|desktop\.ini|\.debug)$/i;
 const FIXED_TIME = new Date('2020-01-01T00:00:00Z'); // aynı içerik → aynı ZIP
 
 function build(tag, { extDir = path.join(ROOT, 'extension'), outDir = path.join(ROOT, 'dist') } = {}) {

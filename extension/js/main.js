@@ -7,7 +7,6 @@
 
   const S = window.SiteScraper;
   const HOVER_DELAY_MS = 150;
-  const PANEL_STARTED_AT = Date.now();
   const TABS = ['trending', 'best', 'recent', 'category', 'favorites', 'used'];
   const LOCAL_TABS = ['favorites', 'used']; // siteden değil, kitaplıktan (library.json) gelen listeler
   const TAB_TITLES = {
@@ -145,98 +144,16 @@
 
   /* ------------------------------------------------------------------ Cloudflare doğrulaması */
 
-  // Doğrula tuşu myinstants.com'u window.open ile PANELİN KENDİ Chromium'unda açar; böylece orada
-  // alınan Cloudflare çerezi paneldeki isteklerde de geçerli olur. (Sistem tarayıcısı KULLANILMAZ:
-  // onun çerezleri ayrıdır.) Pencere kapanınca bekleyen istek otomatik tekrarlanır.
-  const verify = {
-    win: null,
-    timer: null,
-    retry: null,
-    openFailed: false,
-    justVerified: false, // son doğrulamadan sonraki ilk deneme sürüyor / başarısız oldu
-  };
+  // Site Cloudflare doğrulaması isterse panel bunu açıkça söyler ama doğrulama sayfasını AÇMAZ: Premiere panellerin
+  // yeni pencere açmasına izin vermiyor; sayfayı panelin içinde göstermek ise bir sitenin, dosya yazabilen panelin
+  // içinde çalışması demek (güvenlik riski). Bu doğrulamalar genelde kısa sürede kendiliğinden kalkar.
+  let challengeSeen = false; // bu oturumda doğrulama istendi mi (sonra bir istek geçince haber vermek için)
 
-  function openVerifyWindow(url, retry) {
-    verify.retry = retry;
-    verify.justVerified = false;
-    if (verify.win && !isClosed(verify.win)) {
-      try {
-        verify.win.focus();
-      } catch (e) {
-        /* yoksay */
-      }
-      return;
-    }
-    let w = null;
-    try {
-      w = window.open(url || S.BASE + '/', 'myinstants-verify', 'width=460,height=640,resizable=yes,scrollbars=yes');
-    } catch (e) {
-      w = null;
-    }
-    if (!w) {
-      verify.openFailed = true;
-      console.warn('[MyInstants] Doğrulama penceresi açılamadı (window.open null döndü)');
-      rerenderMessages();
-      return;
-    }
-    verify.openFailed = false;
-    verify.win = w;
-    clearInterval(verify.timer);
-    verify.timer = setInterval(() => {
-      if (isClosed(w)) finishVerify();
-    }, 500);
-    rerenderMessages();
-  }
-
-  function isClosed(w) {
-    try {
-      return w.closed;
-    } catch (e) {
-      return true;
-    }
-  }
-
-  // Pencere kapandı (ya da kullanıcı "Doğrulamayı bitirdim" dedi) → bekleyen isteği tekrarla
-  function finishVerify() {
-    clearInterval(verify.timer);
-    verify.timer = null;
-    if (verify.win && !isClosed(verify.win)) {
-      try {
-        verify.win.close();
-      } catch (e) {
-        /* yoksay */
-      }
-    }
-    verify.win = null;
-    verify.justVerified = true;
-    const retry = verify.retry;
-    verify.retry = null;
-    rerenderMessages();
-    if (retry) retry();
-  }
-
-  // Bir istek doğrulama istemeden başarılı olunca çağrılır (çerez kalıcılığı teşhisi için).
+  // Bir istek doğrulamaya takılmadan başarılı olunca çağrılır
   function noteSuccess() {
-    if (verify.justVerified) {
-      verify.justVerified = false;
-      store.set('verifiedAt', Date.now());
-      flash('Doğrulama tamam');
-      return;
-    }
-    const at = Number(store.get('verifiedAt', '0'));
-    if (at && at < PANEL_STARTED_AT && !noteSuccess.reported) {
-      noteSuccess.reported = true;
-      flash(`Doğrulama istenmedi (son doğrulama ${ago(at)})`);
-    }
-  }
-
-  function ago(t) {
-    const m = Math.round((Date.now() - t) / 60000);
-    if (m < 1) return 'az önce';
-    if (m < 60) return m + ' dk önce';
-    const h = Math.round(m / 60);
-    if (h < 48) return h + ' sa önce';
-    return Math.round(h / 24) + ' gün önce';
+    if (!challengeSeen) return;
+    challengeSeen = false;
+    flash('Site yeniden açık');
   }
 
   function flash(text) {
@@ -293,49 +210,24 @@
     return s;
   }
 
-  // "Site doğrulama istiyor" kutusu. after: pencere kapanınca ne olacağı (liste yenilenir / ses denenir)
-  function challengeBox(err, title, retry, after = 'liste kendiliğinden yenilenir') {
+  // "Site doğrulama istiyor" kutusu: ne olduğunu ve ne yapılacağını söyler (Doğrula tuşu yok; bkz. yukarı)
+  function challengeBox(err, title, retry, onClose) {
+    challengeSeen = true;
     const box = document.createElement('div');
     box.className = 'msg error challenge';
-    box.append(head('shield-check', title || 'Site doğrulama istiyor.'));
-
-    if (verify.win && !isClosed(verify.win)) {
-      box.append(
-        line(`Doğrulama penceresi açık. Oradaki adımı tamamlayıp pencereyi kapatın; ${after}.`),
-        actionsRow([button('Doğrulamayı bitirdim', 'retry', finishVerify)])
-      );
-      return box;
-    }
-
-    if (verify.openFailed) {
-      box.append(line('Doğrulama penceresi açılamadı: Premiere yeni pencereye izin vermedi. Bu durumu bildirin.'));
-    } else if (verify.justVerified) {
-      box.append(
-        line(
-          err.hardBlock
-            ? 'Doğrulamadan sonra site hâlâ engelliyor (“Sorry, you have been blocked”). Doğrulama bu engeli kaldırmıyor; bu durumu bildirin.'
-            : 'Doğrulamadan sonra site hâlâ doğrulama istiyor. Penceredeki adımı tamamladığınızdan emin olun; sürerse bu durumu bildirin.'
-        )
-      );
-    } else {
-      box.append(
-        line(
-          `Doğrula tuşu myinstants.com’u küçük bir pencerede açar. Oradaki “insan olduğunuzu doğrulayın” adımını tamamlayıp pencereyi kapatın; ${after}.`
-        )
-      );
-      const at = Number(store.get('verifiedAt', '0'));
-      if (at && at < PANEL_STARTED_AT) {
-        box.append(
-          line(
-            `Not: En son ${ago(at)} doğrulamıştınız. Panel/Premiere yeniden açılınca doğrulama korunmamış (çerez silinmiş ya da süresi dolmuş).`,
-            'detail'
-          )
-        );
-        console.warn('[MyInstants] Önceki doğrulama bu oturumda geçerli değil. verifiedAt=' + new Date(at).toISOString());
-      }
-    }
+    box.append(head('shield-check', title || 'Site şu an doğrulama istiyor.'));
+    box.append(
+      line(
+        err.hardBlock
+          ? 'myinstants.com bu bağlantıyı engelliyor (“Sorry, you have been blocked”). Bir süre sonra tekrar deneyin.'
+          : 'myinstants.com (Cloudflare) “insan mısınız” doğrulaması istiyor; panel bu doğrulamayı gösteremiyor. Genelde birkaç dakika içinde kendiliğinden kalkar: biraz bekleyip Tekrar dene’ye basın.'
+      )
+    );
+    box.append(line('Favorilerdeki sesler bilgisayardaki kopyadan çalmaya devam eder.', 'detail'));
     if (err.status) box.append(line('HTTP ' + err.status + (err.hardBlock ? ' · engel sayfası' : ' · doğrulama sayfası'), 'detail'));
-    box.append(actionsRow([button('Doğrula', 'retry primary', () => openVerifyWindow(err.url, retry))]));
+    box.append(
+      actionsRow([onClose ? button('Kapat', 'retry', onClose) : null, retry ? button('Tekrar dene', 'retry primary', retry) : null])
+    );
     return box;
   }
 
@@ -376,14 +268,9 @@
     }
     el.notice.append(
       n.err.kind === 'challenge'
-        ? challengeBox(n.err, n.title, n.retry, n.after || 'ses yeniden denenir')
+        ? challengeBox(n.err, n.title, n.retry, closeNotice)
         : errorBox(n.err, n.retry, n.title, closeNotice)
     );
-  }
-
-  function rerenderMessages() {
-    renderNotice();
-    renderListEnd();
   }
 
   /* ------------------------------------------------------------------ önizleme */
@@ -525,7 +412,7 @@
     state.notice = {
       err,
       title: 'Ses çalınamadı: site doğrulama istiyor.',
-      // Doğrulama penceresi kapanınca aynı sesi tekrar dene
+      // Tekrar dene: aynı sesi siteden yeniden iste; geçerse uyarı kalkar
       retry: async () => {
         try {
           await S.fetchAudio(item.mp3);
@@ -890,7 +777,6 @@
         err,
         jobItem: item,
         title: `“${item.name}” eklenemedi.`,
-        after: 'indirme yeniden denenir',
         retry: () => queueDownload(item, btn),
       };
       if (err.kind === 'challenge') state.notice.title = 'İndirmek için site doğrulama istiyor.';
@@ -1622,7 +1508,6 @@
     state,
     preview,
     loadList,
-    verify,
     runDiagnostics,
     checkForUpdates,
     update,

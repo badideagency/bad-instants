@@ -76,12 +76,13 @@ Teşhis: alt çubuktaki yeşil "Premiere … ✓" yazısına ya da panel menüs�
 - Bütün istekler **panelin kendi Chromium'uyla** yapılır (`fetch`, çerezler dahil). Node siteye istek atmaz;
   Node yalnızca (Aşama 2'de) indirilen dosyayı diske yazar.
 - CORS'a takılmamak için manifest'te `--disable-web-security` açıktır.
-- Site Cloudflare doğrulaması isterse panel ayrıştırmaya çalışmaz; **"Site doğrulama istiyor"** der ve
-  **Doğrula** tuşunu gösterir. Tuş myinstants.com'u panelin kendi Chromium'unda küçük bir pencerede açar
-  (`window.open`; sistem tarayıcısı KULLANILMAZ, onun çerezleri ayrıdır). Doğrulamayı yapıp pencereyi
-  kapatınca istek kendiliğinden tekrarlanır.
-- Doğrulamadan sonra açılışta site yine doğrulama isterse panel bunu açıkça yazar
-  ("yeniden açılınca doğrulama korunmamış"). Çerezlerin kalması için `--persist-session-cookies` açıktır.
+- Site Cloudflare doğrulaması isterse panel ayrıştırmaya çalışmaz; **"Site şu an doğrulama istiyor"** der ve
+  yalnızca **Tekrar dene** tuşunu gösterir. Bu doğrulamalar genelde birkaç dakika içinde kendiliğinden kalkar.
+  Favorilerdeki sesler bilgisayardaki kopyadan çalmaya devam eder.
+- Panel doğrulama sayfasını **açmaz**: Premiere panellerin yeni pencere açmasına izin vermiyor; sayfayı panelin
+  içinde göstermek ise bir sitenin, dosya yazabilen panelin içinde çalışması demek (güvenlik riski). Sistem
+  tarayıcısı da kullanılmaz (onun çerezleri ayrıdır).
+- "Sorry, you have been blocked" (kesin engel) ayrı bir mesajla söylenir.
 
 ## Klasörler
 
@@ -100,7 +101,7 @@ extension/            ← Premiere'e bağlanan panel klasörü
   js/vendor/fflate.js ← saf JS ZIP kütüphanesi (MIT)
   js/CSInterface.js   ← Adobe'nin resmi CEP 12 dosyası
   jsx/host.jsx        ← Premiere tarafı (ExtendScript, ES3): import, boş track bulma, overwrite, teşhis
-  .debug              ← hata ayıklama portu (8871)
+  .debug              ← hata ayıklama portu (8871) — YALNIZ geliştirme için; yayınlanan pakete girmez
 install.bat           ← paneli kurar (bağlantı/junction ile)
 uninstall.bat         ← paneli kaldırır
 tools/site-probe.bat  ← YALNIZ TEŞHİS: sitenin yapısını PowerShell ile raporlar (panelin davranışını göstermez)
@@ -143,7 +144,11 @@ panel "sitenin yapısı değişmiş olabilir" dediğinde HTML'e bakmak için kul
 
 ## Hata ayıklama
 
-Panel Premiere'de açıkken Chrome'da `http://localhost:8871` → panelin Console'u.
+Yayınlanan pakette `.debug` dosyası **yoktur** (güncelleme onu kurulumdan da kaldırır): Premiere'in geliştirici modu
+açıkken bu dosya, bilgisayardaki başka programların paneli dışarıdan yönetebileceği bir kapı açar.
+Hata ayıklamak gerekirse depodaki `extension/.debug` dosyasını panel klasörüne kopyalayın, Premiere'i yeniden
+başlatın; Chrome'da `http://localhost:8871` → panelin Console'u. İşiniz bitince dosyayı silin.
+(Depodan `install.bat` ile bağlanan geliştirici kurulumunda dosya zaten vardır.)
 
 ## Sürüm yayınlama (geliştirici)
 
@@ -160,7 +165,7 @@ npm install
 npm test          # siteScraper, localFiles, library, updater, theme ve host.jsx (sahte Premiere içinde; ES3 uyumu dahil)
 npm run test:ui   # paneli manifest'teki CEF ayarlarıyla headless Chromium'da açar; www.myinstants.com adını
                   # Cloudflare benzeri sahte bir siteye (tests/fake-site.js) yönlendirip gerçek fetch yolunu,
-                  # Doğrula penceresini, çerez paylaşımını ve yeniden açılışta çerezin kalmasını dener
+                  # doğrulama / engel mesajlarını, Tekrar dene'yi ve hiçbir pencere açılmadığını dener
 npm run test:stage2 # İndir → diske yaz → import → timeline akışı (sahte site + sahte Premiere + sahte disk)
 npm run test:update # panel içi güncelleme: sahte GitHub, gerçek geçici kurulum klasörü, menü, geri dönüş
 npm run test:design # tasarım denetimi: bütün durumların ekran görüntüsü, Geist + Türkçe harfler, kontrast, dar panel
