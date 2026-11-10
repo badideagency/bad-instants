@@ -133,7 +133,111 @@
 
   /* ------------------------------------------------------------------ tarayıcı istekleri */
 
+  // Cloudflare bypass için Node.js tarafında undici fetch kullanılır.
+  // cf_clearance cookie'si cache/cookies.json dosyasında saklanır ve her istekte otomatik eklenir.
+  var _cfCookieCache = null;
+  var _cookieFile = null;
+
+  function _initCookieCache() {
+    if (_cookieFile) return;
+    try {
+      var fs = typeof require === 'function' ? require('fs') : null;
+      var pathMod = typeof require === 'function' ? require('path') : null;
+      if (fs && pathMod) {
+        _cookieFile = pathMod.join(pathMod.dirname(__filename || '/extension/js/siteScraper.js'), '..', 'cache', 'cookies.json');
+        try {
+          var raw = fs.readFileSync(_cookieFile, 'utf8');
+          _cfCookieCache = JSON.parse(raw);
+        } catch (e) {
+          _cfCookieCache = {};
+        }
+      } else {
+        _cfCookieCache = {};
+      }
+    } catch (e) {
+      _cfCookieCache = {};
+    }
+  }
+
+  function _saveCookies() {
+    if (!_cookieFile || !_cfCookieCache) return;
+    try {
+      var fs = typeof require === 'function' ? require('fs') : null;
+      if (!fs) return;
+      var dir = _cookieFile.split(/[\\/]/);
+      dir.pop();
+      var dirPath = dir.join('/');
+      // Node.js tarafında çalışıyorsa mkdirSync
+      try { fs.mkdirSync(dirPath, { recursive: true }); } catch (e) {}
+      fs.writeFileSync(_cookieFile, JSON.stringify(_cfCookieCache, null, 2));
+    } catch (e) {}
+  }
+
+  function _getCfClearance(url) {
+    if (!_cfCookieCache || !_cfCookieCache[url]) return '';
+    var c = _cfCookieCache[url];
+    // Cookie süresi dolmuş olabilir — 30dk cache TTL
+    if (c.expires && Date.now() > c.expires) {
+      delete _cfCookieCache[url];
+      _saveCookies();
+      return '';
+    }
+    return 'cf_clearance=' + encodeURIComponent(c.value);
+  }
+
+  function _setCfClearance(url, value) {
+    if (!url || !value) return;
+    if (!_cfCookieCache) _initCookieCache();
+    // Cookie'nin ne zaman süreceğini tahmin et (genelde ~30dk-2sa)
+    _cfCookieCache[url] = { value: value, expires: Date.now() + 30 * 60 * 1000 };
+    _saveCookies();
+  }
+
+  // Gerçek tarayıcı header'ları — Cloudflare TLS fingerprint simülasyonu
+  var _browserHeaders = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.9,tr;q=0.8',
+    'Accept-Encoding': 'gzip, deflate, br',
+    'Sec-Fetch-Dest': 'document',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-Site': 'none',
+    'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120"',
+    'Sec-Ch-Ua-Mobile': '?0',
+    'Sec-Ch-Ua-Platform': '"Windows"',
+  };
+
   function doFetch(url, signal, extra) {
+    // Önce Node.js tarafında undici fetch dene (Cloudflare bypass için)
+    if (typeof global.fetch === 'function') {
+      var headers = Object.assign({}, _browserHeaders);
+      // Cached cf_clearance cookie ekle
+      var cachedCookie = _getCfClearance(url);
+      if (cachedCookie) {
+        headers['Cookie'] = cachedCookie;
+      }
+      return global.fetch(
+        url,
+        Object.assign({
+          credentials: 'include',
+          cache: 'no-store',
+          redirect: 'follow',
+          signal: signal,
+          headers: headers
+        }, extra)
+      ).then(function(res) {
+        // Response'dan cf_clearance cookie'sini yakala ve cache'e yaz
+        try {
+          var setCookie = res.headers.get('set-cookie') || '';
+          var match = setCookie.match(/cf_clearance=([^;]+)/);
+          if (match) {
+            _setCfClearance(url, match[1]);
+          }
+        } catch (e) {}
+        return res;
+      });
+    }
+    // Fallback: tarayıcı fetch (Chromium)
     if (typeof root.fetch !== 'function') throw scraperError('nofetch', 'Tarayıcı fetch() yok');
     return root.fetch(
       url,
