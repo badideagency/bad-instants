@@ -25,9 +25,9 @@ const ROOT = path.join(__dirname, '..');
 const MANIFEST = path.join(ROOT, 'extension', 'CSXS', 'manifest.xml');
 
 function sh(cmd, args, opts = {}) {
-  // Windows'ta npm.cmd / npx.cmd kullanılmalı (execFileSync native binary arar)
-  if (process.platform === 'win32' && /^npm($|\.)/i.test(cmd)) cmd = 'npm.cmd';
-  return execFileSync(cmd, args, Object.assign({ cwd: ROOT, encoding: 'utf8' }, opts));
+  // Windows'ta npm.cmd / npx.cmd — shell:true ile çalıştır (execFileSync .cmd array arg'lerde EINVAL verir)
+  const useShell = process.platform === 'win32' && /^npm($|\.)/i.test(cmd);
+  return execFileSync(cmd, args, Object.assign({ cwd: ROOT, encoding: 'utf8', shell: useShell }, opts));
 }
 function git(...args) {
   return sh('git', args).trim();
