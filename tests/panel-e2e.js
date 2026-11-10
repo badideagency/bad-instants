@@ -152,6 +152,81 @@ async function main() {
   await page.mouse.move(5, 5);
   step('Önizleme doğrulamaya takıldı → üstte uyarı (Kapat / Tekrar dene) → site açılınca uyarı kalktı, ses çaldı');
 
+  /* ---------- 7b) Kırmızı satır: sebebi söylenir ---------- */
+  const failedRow = (i, re) =>
+    page.waitForFunction(
+      ([i, src]) => {
+        const r = document.querySelectorAll('#rows .row')[i];
+        return r.classList.contains('error') && new RegExp(src).test(r.querySelector('.why').textContent);
+      },
+      [i, re.source]
+    );
+  const hoverOut = () => page.mouse.move(5, 5);
+  const diagText = async () => {
+    await page.locator('#hostText').click();
+    await page.waitForFunction(() => /Teşhis/.test(document.querySelector('#notice').textContent));
+    return page.locator('#notice pre').textContent();
+  };
+
+  // (a) Site ses dosyasını <audio> isteğine kapatmış, tarayıcı isteğine açık: kırmızı kalmaz, indirilen kopyadan çalar
+  site.state.audioBlocked = true;
+  await rows().nth(1).hover();
+  await page.waitForFunction(() => window.MyInstantsPanel.preview.viaBlob);
+  await page.waitForFunction(() => {
+    const r = document.querySelectorAll('#rows .row')[1];
+    return r.classList.contains('playing') && !r.classList.contains('buffering') && !r.classList.contains('error');
+  });
+  assert.match(await page.evaluate(() => window.MyInstantsPanel.preview.audio.src), /^blob:/);
+  await hoverOut();
+  site.state.audioBlocked = false;
+  step('Ses dosyası yalnız <audio> isteğine kapalıyken: panel tarayıcı isteğiyle indirip oradan çaldı, satır kırmızı kalmadı');
+
+  // (b) Ses sitede silinmiş (404): satırın sağında "sitede yok"; aynı oturumda tekrar istek atılmaz
+  site.state.mediaGone = true;
+  await rows().nth(3).hover();
+  await failedRow(3, /^sitede yok$/);
+  assert.match(await page.locator('#rows .row').nth(3).locator('.why').getAttribute('title'), /Bu ses sitede artık yok \(404\)/);
+  assert.match(await page.locator('#statusText').textContent(), /Bu ses sitede artık yok/);
+  await shot('e2e-8-gone.png');
+  await hoverOut();
+  const hits = () => site.state.requests.filter((q) => /don't-stop\.mp3$/.test(decodeURIComponent(q.path))).length;
+  const before = hits();
+  await rows().nth(3).hover();
+  await failedRow(3, /^sitede yok$/);
+  await page.waitForTimeout(400);
+  assert.equal(hits(), before, 'sitede yok çıkan ses için yeniden istek atılmış');
+  await hoverOut();
+  site.state.mediaGone = false;
+  step('Ses sitede yokken: satırda "sitede yok", alt çubukta açık cümle; aynı oturumda siteye yeniden istek atılmadı');
+
+  // (c) Dosya var ama içerik çalınamaz: "biçim"
+  site.state.badAudio = true;
+  await rows().nth(2).hover();
+  await failedRow(2, /^biçim$/);
+  assert.match(await page.locator('#rows .row').nth(2).locator('.why').getAttribute('title'), /İndir’i deneyebilirsiniz/);
+  await hoverOut();
+  site.state.badAudio = false;
+  step('Dosya çalınamaz biçimdeyse: satırda "biçim" ve "İndir’i deneyebilirsiniz"');
+
+  // (d) Teşhis çalınamayan sesleri sebepleriyle listeler
+  const diag = await diagText();
+  assert.match(diag, /Çalınamayan sesler \(bu oturum\): 2/);
+  assert.match(diag, /• .+ — Bu ses sitede artık yok \(404\)\./);
+  assert.match(diag, /• .+ — Bu ses biçimi panelde çalınamıyor/);
+  await page.locator('#notice button', { hasText: 'Kapat' }).click();
+  step('Teşhis ekranı çalınamayan sesleri sebepleriyle listeledi');
+
+  // (e) Yenile: bilinen kötüler sıfırlanır, site düzelince ses çalar
+  await page.locator('#refreshBtn').click();
+  await page.waitForFunction(() => document.querySelectorAll('#rows .row').length === 4 && !document.querySelector('#rows .row.error'));
+  await rows().nth(3).hover();
+  await page.waitForFunction(() => {
+    const r = document.querySelectorAll('#rows .row')[3];
+    return r.classList.contains('playing') && !r.classList.contains('buffering') && !r.classList.contains('error');
+  });
+  await hoverOut();
+  step('Yenile sonrası önceden kırmızı olan ses yeniden denendi ve çaldı');
+
   /* ---------- 8) Kesin engel ---------- */
   site.state.mode = 'block';
   await page.locator('#refreshBtn').click();

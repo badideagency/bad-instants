@@ -83,6 +83,10 @@ Teşhis: alt çubuktaki yeşil "Premiere … ✓" yazısına ya da panel menüs�
   içinde göstermek ise bir sitenin, dosya yazabilen panelin içinde çalışması demek (güvenlik riski). Sistem
   tarayıcısı da kullanılmaz (onun çerezleri ayrıdır).
 - "Sorry, you have been blocked" (kesin engel) ayrı bir mesajla söylenir.
+- **Kırmızı (çalınamayan) satır:** Sesin sitedeki adresi çalmazsa panel aynı sesi tarayıcı isteğiyle indirip oradan
+  çalmayı dener; olmazsa sebebi satırın sağında kısa yazıyla gösterir (`sitede yok`, `doğrulama`, `biçim`,
+  `ulaşılamadı`…), açık cümle ipucunda ve alt çubukta çıkar, Teşhis bu oturumdaki listeyi verir. Sitede yok (404)
+  ve biçim sorunları aynı oturumda yeniden denenmez (siteyi boşuna yormamak için); Yenile hepsini sıfırlar.
 
 ## Klasörler
 

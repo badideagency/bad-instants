@@ -285,11 +285,20 @@
     let localSource = null; // favorinin yerel kopyası için adres veren fonksiyon (yoksa null döner)
     let local = false; // şu an yerel kopya mı çalıyor
     let seq = 0; // her yeni çalma/durdurma, bekleyen yerel dosya okumasını geçersiz kılar
+    let recover = null; // (öğe) → Promise<blob adresi>: sitenin adresi çalmazsa aynı sesi tarayıcı isteğiyle indirir
+    let knownBad = null; // (öğe) → daha önce sitede yok / biçimi çalınamaz çıkmış mı (yeniden istek atılmaz)
+    let blobUrl = null; // kurtarma için oluşturulan blob adresi
+    let viaBlob = false; // şu an kurtarma kopyası mı çalıyor
 
     function release() {
       if (row) row.classList.remove('playing', 'buffering');
       row = null;
       item = null;
+    }
+
+    function revokeBlob() {
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
+      blobUrl = null;
     }
 
     function stop() {
@@ -302,12 +311,15 @@
         audio.removeAttribute('src');
         audio.load();
       }
+      viaBlob = false;
+      revokeBlob();
     }
 
-    function fail(r, it) {
+    // err.kind: çalınamama sebebi (gone, challenge, busy, offline, timeout, server, notaudio, format, unknown)
+    function fail(r, it, err, quiet) {
       r.classList.remove('playing', 'buffering');
       r.classList.add('error');
-      if (onFail) onFail(it);
+      if (onFail) onFail(it, err || { kind: 'unknown' }, r, !!quiet);
     }
 
     function play(r, it) {
@@ -315,6 +327,14 @@
       row = r;
       item = it;
       r.classList.remove('error');
+      const bad = knownBad ? knownBad(it) : null;
+      if (bad) {
+        // Bu oturumda zaten sitede yok / çalınamaz çıktı: siteyi boşuna yormadan sebebi yine göster
+        row = null;
+        item = null;
+        fail(r, it, bad, true);
+        return;
+      }
       r.classList.add('playing', 'buffering');
       // Favorinin yerel kopyası varsa önce o (site sesi silse de çalışır); yoksa doğrudan sitenin adresi
       const pending = localSource ? localSource(it) : null;
@@ -338,7 +358,7 @@
         p.catch((err) => {
           if (row === r && err && err.name !== 'AbortError' && err.name !== 'NotSupportedError') {
             release();
-            fail(r, it);
+            fail(r, it, { kind: 'unknown', detail: err.name });
           }
         });
       }
@@ -358,8 +378,36 @@
         }
         const r = row;
         const it = item;
-        release();
-        fail(r, it);
+        if (viaBlob) {
+          // Tarayıcıyla indirilen kopya da çalmadı: dosya var ama bu biçim panelde çalınamıyor
+          release();
+          fail(r, it, { kind: 'format' });
+          return;
+        }
+        if (!recover) {
+          release();
+          fail(r, it, { kind: 'unknown' });
+          return;
+        }
+        // Sitenin adresi çalmadı: aynı sesi tarayıcı isteğiyle indirip oradan çalmayı dene; olmazsa sebebi öğren
+        const my = ++seq;
+        recover(it).then(
+          (url) => {
+            if (my !== seq || row !== r) {
+              URL.revokeObjectURL(url);
+              return;
+            }
+            revokeBlob();
+            blobUrl = url;
+            viaBlob = true;
+            start(r, it, url, false);
+          },
+          (err) => {
+            if (my !== seq || row !== r) return;
+            release();
+            fail(r, it, err);
+          }
+        );
       }
     });
 
@@ -388,6 +436,15 @@
       setLocalSource(fn) {
         localSource = fn;
       },
+      setRecover(fn) {
+        recover = fn;
+      },
+      setKnownBad(fn) {
+        knownBad = fn;
+      },
+      get viaBlob() {
+        return viaBlob;
+      },
       get local() {
         return local;
       },
@@ -397,15 +454,53 @@
     };
   })();
 
-  // Bir ses çalınamazsa aynı adresi tarayıcıyla kontrol et: sebep Cloudflare doğrulamasıysa söyle.
-  preview.onFail(async (item) => {
+  // Önizleme çalınamayınca sebebi söylenir: satırın sağında kısa yazı, alt çubukta açık cümle, teşhiste liste.
+  const FAIL_TEXT = {
+    gone: ['sitede yok', 'Bu ses sitede artık yok (404).'],
+    challenge: ['doğrulama', 'Site doğrulama istiyor.'],
+    busy: ['site meşgul', 'Site çok fazla istek aldığını söylüyor; biraz bekleyin.'],
+    offline: ['bağlantı yok', 'İnternet bağlantısı yok.'],
+    timeout: ['ulaşılamadı', 'Site cevap vermedi (zaman aşımı).'],
+    server: ['ulaşılamadı', 'Siteye ulaşılamadı.'],
+    cors: ['ulaşılamadı', 'Panel siteye bağlanamıyor (tarayıcı güvenlik ayarı).'],
+    notaudio: ['ses değil', 'Site ses yerine başka bir sayfa gönderdi.'],
+    format: ['biçim', 'Bu ses biçimi panelde çalınamıyor; İndir’i deneyebilirsiniz.'],
+    unknown: ['çalınamadı', 'Ses çalınamadı (sebep belirlenemedi).'],
+  };
+  const failText = (kind) => FAIL_TEXT[kind] || FAIL_TEXT.unknown;
+  const failures = new Map(); // id → { name, kind, at }: bu oturumda çalınamayan sesler (teşhis için)
+  const KNOWN_BAD_KINDS = ['gone', 'format'];
+
+  // Sebebi bilinen ve değişmeyecek olanlar (sitede yok / biçim) için aynı oturumda yeniden istek atılmaz
+  preview.setKnownBad((item) => {
+    const f = failures.get(item.id);
+    return f && KNOWN_BAD_KINDS.includes(f.kind) ? { kind: f.kind } : null;
+  });
+
+  // Sitenin adresi çalmazsa: aynı sesi tarayıcı isteğiyle indir (blob). Başarısızsa sebep hata türünden bilinir.
+  preview.setRecover(async (item) => {
+    const a = await S.fetchAudio(item.mp3);
+    return URL.createObjectURL(new Blob([a.buffer], { type: a.type || 'audio/mpeg' }));
+  });
+
+  function setWhy(row, kind) {
+    const why = row.querySelector('.why');
+    if (!why) return;
+    why.textContent = kind ? failText(kind)[0] : '';
+    why.title = kind ? failText(kind)[1] : '';
+    row.dataset.failReason = kind || '';
+  }
+
+  preview.onFail((item, err, row, quiet) => {
     if (!item) return;
-    try {
-      await S.fetchAudio(item.mp3);
-    } catch (err) {
-      console.warn('[MyInstants] Önizleme çalınamadı:', item.mp3, err);
-      if (err.kind === 'challenge') showAudioChallenge(item, err);
-    }
+    let kind = (err && err.kind) || 'unknown';
+    if (kind === 'notfound') kind = 'gone'; // siteScraper'ın 404 hatası
+    if (row && row.isConnected) setWhy(row, kind);
+    if (quiet) return;
+    console.warn('[MyInstants] Önizleme çalınamadı:', item.mp3, kind, err);
+    failures.set(item.id, { name: item.name, kind, at: Date.now() });
+    flash(`“${item.name}”: ${failText(kind)[1]}`);
+    if (kind === 'challenge') showAudioChallenge(item, err);
   });
 
   function showAudioChallenge(item, err) {
@@ -417,7 +512,11 @@
         try {
           await S.fetchAudio(item.mp3);
           state.notice = null;
-          el.rows.querySelectorAll('.row.error').forEach((r) => r.classList.remove('error'));
+          el.rows.querySelectorAll('.row.error').forEach((r) => {
+            r.classList.remove('error');
+            setWhy(r, '');
+          });
+          failures.forEach((f, id) => f.kind === 'challenge' && failures.delete(id));
           noteSuccess();
         } catch (e) {
           if (e.kind === 'challenge') showAudioChallenge(item, e);
@@ -640,6 +739,16 @@
     lib.ready
       .then(() => libReady() && L.addRecent(item))
       .catch((e) => console.warn('[MyInstants] Son kullanılanlara yazılamadı:', e));
+  }
+
+  // Teşhis: bu oturumda çalınamayan son sesler ve sebepleri
+  function failDiagLines() {
+    const list = [...failures.values()].sort((a, b) => b.at - a.at);
+    if (!list.length) return ['Çalınamayan ses (bu oturum): yok'];
+    const lines = [`Çalınamayan sesler (bu oturum): ${list.length}`];
+    list.slice(0, 8).forEach((f) => lines.push(`  • ${f.name} — ${failText(f.kind)[1]}`));
+    if (list.length > 8) lines.push(`  … ve ${list.length - 8} tane daha`);
+    return lines;
   }
 
   async function libDiagLines() {
@@ -873,6 +982,7 @@
     }
     const unit = store.get('timeUnit.' + (hostVersion || 'bilinmiyor'), '');
     lines.push('Zaman birimi (bu sürüm): ' + (unit === 'ticks' ? 'tick (metin)' : unit === 'seconds' ? 'saniye' : 'henüz denenmedi'));
+    lines.push(...failDiagLines());
     lines.push(...(await libDiagLines()));
     lines.push(...(await updateDiagLines()));
     state.notice = { title: 'Teşhis', lines };
@@ -1182,6 +1292,9 @@
       toggleFavorite(item);
     });
 
+    const why = document.createElement('span'); // çalınamayan sesin sebebi (yalnız .error satırda görünür)
+    why.className = 'why';
+
     const dl = document.createElement('button');
     dl.type = 'button';
     dl.className = 'dl';
@@ -1193,8 +1306,11 @@
     });
 
     row._miItem = item;
-    row.append(lead, name, fav, dl);
+    row.append(lead, name, why, fav, dl);
     row.addEventListener('mouseenter', () => preview.hoverStart(row, item));
+    row.addEventListener('mouseleave', () => {
+      if (!row.classList.contains('error')) setWhy(row, '');
+    });
     row.addEventListener('mouseleave', () => preview.hoverEnd(row));
     // Önizleme yalnızca hover'a bağlı kalmasın: tıklama ve Enter/Boşluk baştan çalar, Esc durdurur.
     row.addEventListener('click', () => preview.playNow(row, item));
@@ -1462,6 +1578,11 @@
 
   el.refreshBtn.addEventListener('click', () => {
     S.clearCache();
+    failures.clear(); // Yenile: çalınamayan sesler yeniden denenir
+    el.rows.querySelectorAll('.row.error').forEach((r) => {
+      r.classList.remove('error');
+      setWhy(r, '');
+    });
     if (state.tab === 'category') state.categories = null;
     state.notice = null;
     renderNotice();

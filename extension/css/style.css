@@ -282,6 +282,9 @@ button { margin: 0; padding: 0; background: none; border: 0; cursor: pointer; }
 .row.buffering .lead .icon-loader-circle { display: block; animation: spin 700ms linear infinite; }
 .row.error .lead .icon-circle-alert { display: block; color: var(--tehlike-metin); }
 .row.error .name { color: var(--tehlike-metin); }
+/* Çalınamayan sesin sebebi: satırın sağında kısa yazı (tam cümle ipucunda ve alt çubukta) */
+.row .why { display: none; }
+.row.error .why { display: block; flex-shrink: 0; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--tehlike-metin); font-size: var(--fs-yogun); }
 
 /* Yıldız: boş = sönük (satırın üstüne gelince parlar), favori = dolu krem, hep görünür. Durum rengi yok. */
 .fav {

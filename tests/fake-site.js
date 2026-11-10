@@ -5,6 +5,8 @@
 //  mode 'block'     → her istek 403 "Sorry, you have been blocked"
 //  mode 'slow'      → cevaplar 3 sn gecikir
 //  state.mediaGone  → /media/sounds/* 404 döner (site sesi silmiş gibi)
+//  state.audioBlocked → /media/sounds/* yalnız <audio> öğesinin isteğine 403 verir (fetch isteği geçer)
+//  state.badAudio   → /media/sounds/* 200 verir ama içerik ses değil (çalınamaz biçim)
 // Tarayıcı bu siteye --host-resolver-rules ile yönlendirilir; panel gerçek adresle konuşur.
 'use strict';
 
@@ -77,7 +79,7 @@ function listPage(url) {
 }
 
 async function startFakeSite({ certDir }) {
-  const state = { mode: 'open', cookieMode: 'persistent', mediaGone: false, tokens: new Set(), requests: [] };
+  const state = { mode: 'open', cookieMode: 'persistent', mediaGone: false, audioBlocked: false, badAudio: false, tokens: new Set(), requests: [] };
   const wav = silentWav();
 
   const server = https.createServer(makeCert(certDir), (req, res) => {
@@ -126,6 +128,8 @@ async function startFakeSite({ certDir }) {
     const respond = () => {
       if (url.pathname.startsWith('/media/sounds/')) {
         if (state.mediaGone) return send(404, 'text/html', '<title>Page not found</title>');
+        if (state.audioBlocked && req.headers['sec-fetch-dest'] === 'audio') return send(403, 'text/plain', 'yasak');
+        if (state.badAudio) return send(200, 'audio/mpeg', Buffer.from('bu bir ses dosyasi degil, duz metin'));
         return send(200, 'audio/wav', wav);
       }
       if (url.pathname === '/en/categories/') return send(200, 'text/html; charset=utf-8', fixture('categories.html'));
