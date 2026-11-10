@@ -473,6 +473,7 @@
 
   // Sebebi bilinen ve değişmeyecek olanlar (sitede yok / biçim) için aynı oturumda yeniden istek atılmaz
   preview.setKnownBad((item) => {
+    if (hasLocal(item)) return null; // yerel kopyası varsa siteye ihtiyaç yok: çalmayı dene
     const f = failures.get(item.id);
     return f && KNOWN_BAD_KINDS.includes(f.kind) ? { kind: f.kind } : null;
   });
@@ -733,11 +734,16 @@
 
   preview.setLocalSource((item) => (hasLocal(item) ? localAudioUrl(item) : null));
 
-  // Timeline'a başarıyla konan ses "Son kullanılanlar"a yazılır (önizleme sayılmaz; kopya tutulmaz)
-  function rememberUsed(item) {
+  // Timeline'a başarıyla konan ses "Son kullanılanlar"a yazılır ve kopyası yerel arşive alınır (önizleme sayılmaz).
+  // Sonraki önizleme ve İndir siteye gitmeden bu kopyadan çalışır; Cloudflare gelse de bu sesler etkilenmez.
+  function rememberUsed(item, bytes) {
     if (!L) return;
     lib.ready
-      .then(() => libReady() && L.addRecent(item))
+      .then(async () => {
+        if (!libReady()) return;
+        await L.addRecent(item);
+        if (bytes && bytes.byteLength) await L.storeLocal(item.id, bytes);
+      })
       .catch((e) => console.warn('[MyInstants] Son kullanılanlara yazılamadı:', e));
   }
 
@@ -763,10 +769,12 @@
     if (lib.error) return ['Favoriler dosyası: okunamadı — ' + libText(lib.error)];
     const favs = L.favorites();
     const missing = await L.missingLocal().catch(() => favs);
+    const recs = L.recent();
+    const recLocal = recs.filter((r) => L.localPath(r.id)).length;
     const lines = [
       'Favoriler dosyası: ' + file,
       `Favoriler: ${favs.length} (yerel kopya: ${favs.length - missing.length})`,
-      `Son kullanılanlar: ${L.recent().length}`,
+      `Son kullanılanlar: ${recs.length} (yerel kopya: ${recLocal})`,
     ];
     if (lib.corrupt) lines.push('Açılışta bozuk dosya kenara alındı: ' + (lib.corrupt.backup || 'alınamadı'));
     return lines;
@@ -876,7 +884,7 @@
     try {
       const r = await downloadAndPlace(item);
       setDl(btn, 'done', 'A' + r.track);
-      rememberUsed(item);
+      rememberUsed(item, r.bytes);
       if (state.notice && state.notice.jobItem === item) closeNotice();
       flash(`“${item.name}” → A${r.track}` + (r.addedTrack ? ' (yeni track)' : ''));
     } catch (err) {
@@ -902,16 +910,19 @@
     // 2) Dosya: varsa indirme; yoksa tarayıcıyla indir, Node ile diske yaz
     let target = null;
     let seconds = 0;
+    let bytes = null; // arşive de yazılacak ses verisi
     try {
       target = await LocalFiles.chooseTarget(ctx.folder, item.name, item.mp3);
       if (target.exists) {
-        seconds = await measureSeconds(await LocalFiles.readFile(target.path));
+        bytes = await LocalFiles.readFile(target.path);
+        seconds = await measureSeconds(bytes);
       } else {
         // Favorinin yerel kopyası varsa siteye gidilmez (site sesi silse de çalışır)
         const local = hasLocal(item) ? await L.readLocal(item.id) : null;
         const buffer = local || (await S.fetchAudio(item.mp3)).buffer;
         await LocalFiles.ensureDir(ctx.folder);
         await LocalFiles.writeFileAtomic(target.path, buffer);
+        bytes = buffer;
         seconds = await measureSeconds(buffer);
       }
     } catch (e) {
@@ -929,7 +940,7 @@
     );
     if (r.ok) {
       if (r.unit) store.set(unitKey, r.unit); // çalışan zaman birimi bu sürüm için saklanır
-      return r;
+      return Object.assign(r, { bytes });
     }
     // Yerleştirme sorunlarında saklı birime güvenme: bir dahaki sefer yine önce tick denensin.
     if (['unitfailed', 'damaged', 'cleanupfailed'].includes(r.code)) store.set(unitKey, '');

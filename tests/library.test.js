@@ -122,10 +122,38 @@ test('yerel arşiv: favorinin sesi saklanır, okunur; yıldız kaldırılınca s
   await L.removeFavorite('ses-1');
   assert.ok(!fs.existsSync(lp));
   assert.equal(L.localPath('ses-1'), null);
-  // favori olmayanın sesi saklanmaz (son kullanılanlarda kopya yok)
-  await L.addRecent(item(2));
-  assert.equal(await L.storeLocal('ses-2', bytes), false);
+  // ne favori ne son kullanılan olan sesin kopyası saklanmaz
+  assert.equal(await L.storeLocal('ses-9', bytes), false);
   assert.deepEqual(fs.readdirSync(p.audioDir), []);
+});
+
+test('son kullanılanlar da yerel arşive alınır; 50\'yi aşan eski kopyalar silinir; favoriyle ortak kopya korunur', async (t) => {
+  const { p, json } = setup(t);
+  await L.load();
+  const bytes = new Uint8Array([1, 2, 3, 4]);
+  const filesOf = () => fs.readdirSync(p.audioDir).sort();
+  await L.addRecent(item(1));
+  assert.equal(await L.storeLocal('ses-1', bytes), true);
+  assert.ok(L.localPath('ses-1') && fs.existsSync(L.localPath('ses-1')));
+  assert.ok(json().recent[0].file);
+  // tekrar kullanılınca dosya adı korunur, kopya çoğalmaz
+  await L.addRecent(item(1));
+  assert.equal(filesOf().length, 1);
+  assert.equal(json().recent[0].file, filesOf()[0]);
+  // favoriye de alınırsa aynı kopya kullanılır; yıldız kalkınca son kullanılanlardaki kopya silinmez
+  await L.addFavorite(item(1));
+  await L.removeFavorite('ses-1');
+  assert.equal(filesOf().length, 1);
+  assert.equal(L.localPath('ses-1') !== null, true);
+  // 50'yi aşınca en eski kayıtların kopyası silinir
+  for (let i = 2; i <= 52; i++) {
+    await L.addRecent(item(i));
+    await L.storeLocal('ses-' + i, bytes);
+  }
+  assert.equal(L.recent().length, 50);
+  assert.equal(L.localPath('ses-1'), null); // 52 kayıttan en eskisi düştü
+  assert.equal(filesOf().length, 50);
+  assert.ok(!filesOf().some((f) => f.startsWith('ses-1-')));
 });
 
 // Gerçek fs'nin üstüne hata enjekte edilebilen sarmalayıcı

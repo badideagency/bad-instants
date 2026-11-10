@@ -100,7 +100,7 @@ async function main() {
   const lib = () => JSON.parse(disk.text(LIB_FILE));
   const favIds = () => lib().favorites.map((f) => f.id);
   const localFile = (id) => {
-    const f = lib().favorites.find((x) => x.id === id);
+    const f = lib().favorites.find((x) => x.id === id) || lib().recent.find((x) => x.id === id);
     return f && f.file ? AUDIO_DIR + '\\' + f.file : null;
   };
   const hasCopy = (id) => !!localFile(id) && disk.has(localFile(id));
@@ -241,9 +241,20 @@ async function main() {
   await page.waitForFunction(() => window.__played.some((s) => !s.startsWith('blob:')));
   await page.waitForTimeout(300);
   assert.deepEqual(lib().recent.map((r) => r.id), [other.id, B.id]);
-  assert.ok(lib().recent.every((r) => !r.file)); // son kullanılanlar için kopya yok
+  // timeline'a konan ses, son kullanılanlarda yerel kopyasıyla durur (önizleme sayılan ses durmaz)
+  await until(() => lib().recent.every((r) => r.file && hasCopy(r.id)), 'son kullanılanların yerel kopyası');
+  assert.ok(!lib().recent.some((r) => r.id === trending[3].id));
   await tab(page, 'used');
   assert.deepEqual(await names(page), [other.name, B.name]);
+  // Son kullanılan ses favori olmasa da yerel kopyadan çalar (site 404 iken)
+  site.state.mediaGone = true;
+  const sinceUsed = site.state.requests.length;
+  const playedBefore = await page.evaluate(() => window.__played.length);
+  await row(page, 0).click();
+  await page.waitForFunction((n) => window.__played.length > n && window.__played[window.__played.length - 1].startsWith('blob:'), playedBefore);
+  assert.equal(mediaHits(other, sinceUsed), 0);
+  assert.equal(await row(page, 0).evaluate((r) => r.classList.contains('error')), false);
+  site.state.mediaGone = false;
   assert.equal(await page.locator('#region').getAttribute('class'), 'seg disabled');
   assert.equal(await page.locator('.more-btn').count(), 0);
   await page.screenshot({ path: path.join(OUT, 'lib-6-son-kullanilanlar.png') });
@@ -252,7 +263,7 @@ async function main() {
   const diag = await page.locator('#notice pre').textContent();
   assert.match(diag, /Favoriler dosyası: C:\\Users\\Test\\AppData\\Roaming\\BadIdea\\MyInstants\\library\.json/);
   assert.match(diag, /Favoriler: 1 \(yerel kopya: 1\)/);
-  assert.match(diag, /Son kullanılanlar: 2/);
+  assert.match(diag, /Son kullanılanlar: 2 \(yerel kopya: 2\)/);
   assert.deepEqual(errors, []);
   await ctx.close();
   step('Son kullanılanlar: yalnız timeline\'a konanlar, en yeni üstte; önizleme sayılmadı; teşhiste yol ve sayılar');

@@ -31,6 +31,8 @@ Teşhis: alt çubuktaki yeşil "Premiere … ✓" yazısına ya da panel menüs�
 - **Yıldız:** Her sesin yanındaki yıldıza tıklayınca ses **Favoriler** sekmesine eklenir (son eklenen üstte, sınır yok).
   Favoriler sekmesinde yıldızı kaldırılan ses soluklaşır; sekmeden çıkana kadar geri yıldızlanabilir.
 - **Son kullanılanlar:** İndir ile timeline'a başarıyla konan son 50 ses (en yeni üstte). Önizleme sayılmaz.
+  Bu seslerin kopyası da yerel arşive alınır (`library\`); sonraki önizleme ve İndir siteye gitmeden bu kopyadan
+  çalışır. Listeden düşen sesin kopyası silinir (favoriyse kalır).
 - Bu iki sekmede bölge seçici pasiftir ve "Daha fazla" yoktur (hepsi birden gösterilir).
 - **Kayıt yeri:** `%APPDATA%\BadIdea\MyInstants\library.json` (localStorage DEĞİL: CEP'in depolaması `%TEMP%\cep_cache`
   altında ve Premiere sürümüne bağlı; Premiere güncellemesi ya da Temp temizliği silebilir). Dosya Node ile önce geçici
@@ -38,7 +40,7 @@ Teşhis: alt çubuktaki yeşil "Premiere … ✓" yazısına ya da panel menüs�
 - **Favori = yerel arşiv:** Yıldızlanan sesin kopyası arka planda `%APPDATA%\BadIdea\MyInstants\library\` altına alınır
   (önizlemede indirildiyse tarayıcının önbelleğinden). Önizleme ve İndir önce bu kopyayı kullanır; site sesi silse de
   favori çalışır. Kopya alınamazsa (bağlantı yok, doğrulama…) bir sonraki açılışta ya da Favoriler'de Yenile'ye
-  basınca yeniden denenir. Yıldız kaldırılınca kopya silinir. Son kullanılanlar için kopya tutulmaz.
+  basınca yeniden denenir. Yıldız kaldırılınca (son kullanılanlarda da yoksa) kopya silinir.
 - **Dosya bozuksa:** Panel çökmez; bozuk dosya `library.json.bak` olarak kenara alınır (içeriği korunur), boş listeyle
   devam edilir, alt çubukta "Favoriler dosyası bozuktu" uyarısı çıkar (tıklayınca yedeğin yeri görünür).
 - Bölge ve ses seviyesi gibi küçük ayarlar localStorage'da kalır.

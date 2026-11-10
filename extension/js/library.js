@@ -6,7 +6,7 @@
  *   %APPDATA%\BadIdea\MyInstants\library.json      ← kayıt (geçici dosya + yeniden adlandırma; yarım yazma olmaz)
  *   %APPDATA%\BadIdea\MyInstants\library\*.mp3      ← favorilerin yerel kopyası (site sesi silse de çalışır)
  * Dosya bozuksa panel çökmez: bozuk dosya library.json.bak olarak kenara alınır, boş listeyle devam edilir.
- * Son kullanılanlar için ses kopyası tutulmaz, yalnızca kayıt.
+ * Son kullanılanlar (timeline'a konan sesler) de aynı arşive kopyalanır; 50'yi aşan eski kopyalar silinir.
  */
 (function (root, factory) {
   var api = factory(root);
@@ -214,21 +214,20 @@
       if (!isFavorite(id)) data.favorites.splice(Math.min(index, data.favorites.length), 0, f);
       throw e;
     }
-    if (f.file) {
-      try {
-        await fsp().unlink(pj(paths().audioDir, f.file));
-      } catch (e) {
-        /* zaten yok */
-      }
-    }
+    await pruneFiles([f.file]); // son kullanılanlarda da geçiyorsa kopya kalır
   }
 
   async function addRecent(item) {
     ensureLoaded();
-    data.recent = [Object.assign(pick(item), { usedAt: new Date().toISOString() })]
-      .concat(data.recent.filter((r) => r.id !== String(item.id)))
-      .slice(0, RECENT_MAX);
+    const id = String(item.id);
+    const prev = data.recent.find((r) => r.id === id) || data.favorites.find((f) => f.id === id);
+    const entry = Object.assign(pick(item), { usedAt: new Date().toISOString() });
+    if (prev && prev.file) entry.file = prev.file; // kopya zaten alınmışsa korunur
+    const all = [entry].concat(data.recent.filter((r) => r.id !== id));
+    const dropped = all.slice(RECENT_MAX).map((r) => r.file);
+    data.recent = all.slice(0, RECENT_MAX);
     await save();
+    await pruneFiles(dropped); // 50'yi aşan eski kopyalar silinir
   }
 
   /* ------------------------------------------------------------------ yerel ses arşivi (yalnız favoriler) */
@@ -260,9 +259,29 @@
     return `${safe}-${hash8(mp3)}.${ext}`;
   }
 
+  // Bir sesin kopya dosyası: favorilerde ya da son kullanılanlarda kayıtlıysa
+  function fileOf(id) {
+    if (!loaded) return null;
+    const f = data.favorites.find((x) => x.id === id) || data.recent.find((x) => x.id === id);
+    return f && f.file ? f.file : null;
+  }
+
   function localPath(id) {
-    const f = loaded && data.favorites.find((x) => x.id === id);
-    return f && f.file ? pj(paths().audioDir, f.file) : null;
+    const file = fileOf(id);
+    return file ? pj(paths().audioDir, file) : null;
+  }
+
+  // Artık hiçbir kayıtta geçmeyen kopya dosyalarını siler
+  async function pruneFiles(files) {
+    const used = new Set([...data.favorites, ...data.recent].map((e) => e.file).filter(Boolean));
+    for (const file of new Set(files.filter(Boolean))) {
+      if (used.has(file)) continue;
+      try {
+        await fsp().unlink(pj(paths().audioDir, file));
+      } catch (e) {
+        /* zaten yok */
+      }
+    }
   }
 
   async function readLocal(id) {
@@ -276,23 +295,22 @@
     }
   }
 
-  // Favorinin sesini yerel arşive yazar (hâlâ favoriyse)
+  // Sesin kopyasını yerel arşive yazar (favoriyse ya da son kullanılanlardaysa)
   async function storeLocal(id, bytes) {
     ensureLoaded();
-    const f = data.favorites.find((x) => x.id === id);
-    if (!f) return false; // bu arada yıldızı kaldırılmış
+    const f = data.favorites.find((x) => x.id === id) || data.recent.find((x) => x.id === id);
+    if (!f) return false; // bu arada yıldızı kaldırılmış / listeden düşmüş
     const name = archiveName(f.id, f.mp3);
     await writeAtomic(pj(paths().audioDir, name), bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes));
-    const cur = data.favorites.find((x) => x.id === id); // yazarken kaldırılmış / yeniden eklenmiş olabilir
-    if (!cur) {
-      try {
-        await fsp().unlink(pj(paths().audioDir, name));
-      } catch (e) {
-        /* yok */
-      }
+    // yazarken kaldırılmış / yeniden eklenmiş olabilir; aynı sesin bütün kayıtlarına dosya adı işlenir
+    const entries = [...data.favorites, ...data.recent].filter((x) => x.id === id);
+    if (!entries.length) {
+      await pruneFiles([name]);
       return false;
     }
-    cur.file = name;
+    entries.forEach((x) => {
+      x.file = name;
+    });
     await save();
     return true;
   }
